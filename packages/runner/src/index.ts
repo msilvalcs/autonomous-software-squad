@@ -1,0 +1,133 @@
+import { spawn } from "node:child_process";
+import path from "node:path";
+
+export type AllowedCommand =
+  | "npm install"
+  | "npm test"
+  | "npm run build"
+  | "npm run typecheck";
+
+export interface ExecutionRequest {
+  workspace: string;
+  command: AllowedCommand;
+  timeoutMs: number;
+}
+
+export interface ExecutionResult {
+  command: AllowedCommand;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  durationMs: number;
+  timedOut: boolean;
+}
+
+const commandArguments: Record<AllowedCommand, string[]> = {
+  "npm install": ["install"],
+  "npm test": ["test"],
+  "npm run build": ["run", "build"],
+  "npm run typecheck": ["run", "typecheck"]
+};
+
+export class LocalRunner {
+  private readonly baseDirectory: string;
+
+  constructor(baseDirectory: string) {
+    this.baseDirectory = path.resolve(baseDirectory);
+  }
+
+  async run(
+    request: ExecutionRequest
+  ): Promise<ExecutionResult> {
+    const workspace = this.resolveWorkspace(request.workspace);
+    const args = commandArguments[request.command];
+
+    if (!args) {
+      throw new Error("Command is not allowed");
+    }
+
+    if (
+      !Number.isFinite(request.timeoutMs) ||
+      request.timeoutMs <= 0
+    ) {
+      throw new Error("timeoutMs must be greater than zero");
+    }
+
+    const startedAt = Date.now();
+
+    return new Promise((resolve, reject) => {
+      let stdout = "";
+      let stderr = "";
+      let timedOut = false;
+      let settled = false;
+
+      const child = spawn("npm", args, {
+        cwd: workspace,
+        shell: false,
+        env: {
+          ...process.env,
+          CI: "true"
+        }
+      });
+
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGTERM");
+      }, request.timeoutMs);
+
+      child.stdout.on("data", (chunk: Buffer) => {
+        stdout += chunk.toString();
+      });
+
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString();
+      });
+
+      child.on("error", (error) => {
+        clearTimeout(timeout);
+
+        if (!settled) {
+          settled = true;
+          reject(error);
+        }
+      });
+
+      child.on("close", (exitCode) => {
+        clearTimeout(timeout);
+
+        if (!settled) {
+          settled = true;
+
+          resolve({
+            command: request.command,
+            exitCode,
+            stdout,
+            stderr,
+            durationMs: Date.now() - startedAt,
+            timedOut
+          });
+        }
+      });
+    });
+  }
+
+  private resolveWorkspace(workspace: string): string {
+    const resolvedWorkspace = path.resolve(workspace);
+    const relativePath = path.relative(
+      this.baseDirectory,
+      resolvedWorkspace
+    );
+
+    const isOutsideBaseDirectory =
+      relativePath.startsWith("..") ||
+      path.isAbsolute(relativePath);
+
+    if (isOutsideBaseDirectory) {
+      throw new Error(
+        "Workspace is outside the allowed directory"
+      );
+    }
+
+    return resolvedWorkspace;
+  }
+}
