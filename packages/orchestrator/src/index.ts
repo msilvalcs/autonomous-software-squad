@@ -12,40 +12,56 @@ import type {
   RunState
 } from "@squad/schemas";
 
+import type {
+  LocalRunner,
+  WorkspaceManager
+} from "@squad/runner";
+
 export interface OrchestratorDependencies {
   po: ProductOwnerAgent;
   developer: DeveloperAgent;
   qa: QualityAssuranceAgent;
   eventStore: JsonlEventStore;
+  runner: Pick<LocalRunner, "run">;
+  workspaceManager: Pick<
+    WorkspaceManager,
+    "prepareWorkspace"
+  >;
 }
 
 export interface CreateRunInput {
   briefing: string;
-  workspacePath: string;
   maxAttempts?: number;
 }
 
 export class Orchestrator {
   constructor(
     private readonly dependencies: OrchestratorDependencies
-  ) {}
+  ) { }
 
   async createRun(input: CreateRunInput): Promise<RunState> {
     if (input.briefing.trim() === "") {
       throw new Error("Briefing cannot be empty");
     }
 
+    const runId = `run-${randomUUID()}`;
+
+    const workspacePath =
+      await this.dependencies.workspaceManager.prepareWorkspace(
+        runId
+      );
+
     const now = new Date().toISOString();
 
     const state: RunState = {
-      runId: `run-${randomUUID()}`,
+      runId,
       briefing: input.briefing,
       status: "CREATED",
       currentStoryId: null,
       attempt: 0,
       maxAttempts: input.maxAttempts ?? 3,
       stories: [],
-      workspacePath: input.workspacePath,
+      workspacePath,
       createdAt: now,
       updatedAt: now
     };
@@ -83,6 +99,41 @@ export class Orchestrator {
         }
       });
 
+      await this.recordEvent(state, {
+        actor: "RUNNER",
+        action: "DEPENDENCY_INSTALL_STARTED",
+        message: "Instalação das dependências iniciada."
+      });
+
+      const installation =
+        await this.dependencies.runner.run({
+          workspace: state.workspacePath,
+          command: "npm install",
+          timeoutMs: 180_000
+        });
+
+      await this.recordEvent(state, {
+        actor: "RUNNER",
+        action:
+          installation.exitCode === 0
+            ? "DEPENDENCY_INSTALL_COMPLETED"
+            : "DEPENDENCY_INSTALL_FAILED",
+        message:
+          installation.exitCode === 0
+            ? "Dependências instaladas."
+            : "Falha ao instalar dependências.",
+        metadata: {
+          exitCode: installation.exitCode,
+          durationMs: installation.durationMs,
+          timedOut: installation.timedOut,
+          stderr: installation.stderr.slice(0, 2_000)
+        }
+      });
+
+      if (installation.exitCode !== 0 || installation.timedOut) {
+        throw new Error("Dependency installation failed");
+      }
+
       for (const story of state.stories) {
         state.currentStoryId = story.id;
         state.attempt = 0;
@@ -118,6 +169,56 @@ export class Orchestrator {
               previousQaResult
             });
 
+          const build = await this.dependencies.runner.run({
+            workspace: state.workspacePath,
+            command: "npm run build",
+            timeoutMs: 120_000
+          });
+
+          await this.recordEvent(state, {
+            actor: "RUNNER",
+            action:
+              build.exitCode === 0
+                ? "BUILD_COMPLETED"
+                : "BUILD_FAILED",
+            message:
+              build.exitCode === 0
+                ? "Build concluído."
+                : "Build falhou.",
+            storyId: story.id,
+            metadata: {
+              exitCode: build.exitCode,
+              durationMs: build.durationMs,
+              timedOut: build.timedOut,
+              stderr: build.stderr.slice(0, 2_000)
+            }
+          });
+
+          const tests = await this.dependencies.runner.run({
+            workspace: state.workspacePath,
+            command: "npm test",
+            timeoutMs: 120_000
+          });
+
+          await this.recordEvent(state, {
+            actor: "RUNNER",
+            action:
+              tests.exitCode === 0
+                ? "TESTS_COMPLETED"
+                : "TESTS_FAILED",
+            message:
+              tests.exitCode === 0
+                ? "Testes automatizados aprovados."
+                : "Testes automatizados falharam.",
+            storyId: story.id,
+            metadata: {
+              exitCode: tests.exitCode,
+              durationMs: tests.durationMs,
+              timedOut: tests.timedOut,
+              stderr: tests.stderr.slice(0, 2_000)
+            }
+          });
+
           story.status = "TESTING";
           await this.changeStatus(state, "TESTING");
 
@@ -134,7 +235,9 @@ export class Orchestrator {
           const qaResult =
             await this.dependencies.qa.validate({
               story,
-              implementation
+              implementation,
+              build,
+              tests
             });
 
           if (qaResult.status === "PASS") {

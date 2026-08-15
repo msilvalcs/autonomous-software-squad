@@ -6,6 +6,24 @@ import {
   MockQualityAssuranceAgent
 } from "./index.js";
 
+const successfulBuild = {
+  command: "npm run build",
+  exitCode: 0,
+  stdout: "Build passed",
+  stderr: "",
+  durationMs: 100,
+  timedOut: false
+};
+
+const successfulTests = {
+  command: "npm test",
+  exitCode: 0,
+  stdout: "Tests passed",
+  stderr: "",
+  durationMs: 100,
+  timedOut: false
+};
+
 describe("agentes simulados", () => {
   it("o PO transforma o briefing em stories", async () => {
     const po = new MockProductOwnerAgent();
@@ -60,15 +78,51 @@ describe("agentes simulados", () => {
 
     const firstResult = await qa.validate({
       story,
-      implementation
+      implementation,
+      build: successfulBuild,
+      tests: successfulTests
     });
 
     const secondResult = await qa.validate({
       story,
-      implementation
+      implementation,
+      build: successfulBuild,
+      tests: successfulTests
     });
 
     expect(firstResult.status).toBe("FAIL");
     expect(secondResult.status).toBe("PASS");
+  });
+  it("o QA reprova quando o build falha", async () => {
+    const po = new MockProductOwnerAgent();
+    const developer = new MockDeveloperAgent();
+    const qa = new MockQualityAssuranceAgent();
+    const story = (await po.createBacklog("Aplicação"))[0];
+
+    if (!story) {
+      throw new Error("Story was not created");
+    }
+
+    const implementation = await developer.implement({
+      story,
+      previousQaResult: null
+    });
+
+    const result = await qa.validate({
+      story,
+      implementation,
+      build: {
+        ...successfulBuild,
+        exitCode: 1,
+        stderr: "TypeScript compilation failed"
+      },
+      tests: successfulTests
+    });
+
+    expect(result.status).toBe("FAIL");
+    expect(result.summary).toContain("Build");
+    expect(result.requestedChanges).toContain(
+      "Corrigir os erros de build e testes automatizados."
+    );
   });
 });

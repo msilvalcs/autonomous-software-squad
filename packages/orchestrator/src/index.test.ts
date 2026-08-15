@@ -23,11 +23,31 @@ async function createOrchestrator() {
 
   const eventStore = new JsonlEventStore(directory);
 
+  const successfulExecution = {
+    command: "npm test" as const,
+    exitCode: 0,
+    stdout: "Command passed",
+    stderr: "",
+    durationMs: 10,
+    timedOut: false
+  };
+
+  const runner = {
+    run: async () => successfulExecution
+  };
+
+  const workspaceManager = {
+    prepareWorkspace: async (runId: string) =>
+      path.join(directory, "generated-projects", runId)
+  };
+
   const orchestrator = new Orchestrator({
     po: new MockProductOwnerAgent(),
     developer: new MockDeveloperAgent(),
     qa: new MockQualityAssuranceAgent(),
-    eventStore
+    eventStore,
+    runner,
+    workspaceManager
   });
 
   return {
@@ -51,7 +71,6 @@ describe("Orchestrator", () => {
 
     const initialState = await orchestrator.createRun({
       briefing: "Criar uma aplicação para controle de tarefas.",
-      workspacePath: "generated-projects/test-run",
       maxAttempts: 3
     });
 
@@ -93,8 +112,7 @@ describe("Orchestrator", () => {
 
     await expect(
       orchestrator.createRun({
-        briefing: "   ",
-        workspacePath: "generated-projects/test-run"
+        briefing: "   "
       })
     ).rejects.toThrow("Briefing cannot be empty");
   });

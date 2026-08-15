@@ -4,6 +4,15 @@ import type {
   UserStory
 } from "@squad/schemas";
 
+export interface ExecutionEvidence {
+  command: string;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  durationMs: number;
+  timedOut: boolean;
+}
+
 export interface ProductOwnerAgent {
   createBacklog(briefing: string): Promise<UserStory[]>;
 }
@@ -20,6 +29,8 @@ export interface DeveloperAgent {
 export interface QaInput {
   story: UserStory;
   implementation: DeveloperResult;
+  build: ExecutionEvidence;
+  tests: ExecutionEvidence;
 }
 
 export interface QualityAssuranceAgent {
@@ -79,11 +90,37 @@ export class MockDeveloperAgent implements DeveloperAgent {
 }
 
 export class MockQualityAssuranceAgent
-  implements QualityAssuranceAgent
-{
+  implements QualityAssuranceAgent {
   private attempts = new Map<string, number>();
 
   async validate(input: QaInput): Promise<QaResult> {
+    if (
+      input.build.exitCode !== 0 ||
+      input.tests.exitCode !== 0 ||
+      input.build.timedOut ||
+      input.tests.timedOut
+    ) {
+      return {
+        storyId: input.story.id,
+        status: "FAIL",
+        summary: "Build ou testes automatizados falharam.",
+        criteria: input.story.acceptanceCriteria.map(
+          (criterion) => ({
+            criterion,
+            passed: false,
+            evidence: [
+              input.build.stderr,
+              input.tests.stderr
+            ]
+              .filter(Boolean)
+              .join("\n") || "Execução automatizada falhou."
+          })
+        ),
+        requestedChanges: [
+          "Corrigir os erros de build e testes automatizados."
+        ]
+      };
+    }
     const currentAttempt =
       (this.attempts.get(input.story.id) ?? 0) + 1;
 

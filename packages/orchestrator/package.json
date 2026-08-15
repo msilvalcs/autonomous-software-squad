@@ -13,6 +13,7 @@
   "dependencies": {
     "@squad/agents": "*",
     "@squad/event-store": "*",
+    "@squad/runner": "*",
     "@squad/schemas": "*"
   },
   "devDependencies": {
