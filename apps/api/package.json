@@ -1,0 +1,26 @@
+{
+  "name": "@squad/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.0.0",
+    "@squad/agents": "*",
+    "@squad/event-store": "*",
+    "@squad/orchestrator": "*",
+    "@squad/runner": "*",
+    "dotenv": "^17.0.0",
+    "fastify": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.0.0"
+  }
+}
