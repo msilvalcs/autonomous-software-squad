@@ -76,7 +76,12 @@ export class CodexClient {
       });
 
       if (execution.timedOut) {
-        throw new Error("Codex execution timed out");
+        throw new Error(
+          "Codex execution timed out. Details: " +
+          (execution.stderr.slice(0, 2_000) ||
+            execution.stdout.slice(0, 2_000) ||
+            "No output captured")
+        );
       }
 
       if (execution.exitCode !== 0) {
@@ -134,7 +139,8 @@ async function runCodex(
     const child = spawn("codex", input.args, {
       cwd: path.resolve(input.workingDirectory),
       shell: false,
-      env: process.env
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"]
     });
 
     const timeout = setTimeout(() => {

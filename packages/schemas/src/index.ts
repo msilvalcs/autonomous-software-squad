@@ -20,6 +20,12 @@ export const UserStorySchema = z.object({
 
 export type UserStory = z.infer<typeof UserStorySchema>;
 
+export const BacklogSchema = z.object({
+  stories: z.array(UserStorySchema).min(1).max(6)
+});
+
+export type Backlog = z.infer<typeof BacklogSchema>;
+
 export const DeveloperResultSchema = z.object({
   storyId: z.string().min(1),
   summary: z.string().min(1),

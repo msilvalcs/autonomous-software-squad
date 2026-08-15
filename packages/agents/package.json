@@ -11,6 +11,7 @@
     "test": "vitest run src"
   },
   "dependencies": {
+    "@squad/codex-client": "*",
     "@squad/schemas": "*"
   }
 }

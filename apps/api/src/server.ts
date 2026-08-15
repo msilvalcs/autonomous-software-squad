@@ -1,4 +1,4 @@
-import "dotenv/config";
+import dotenv from "dotenv";
 
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -7,10 +7,12 @@ import cors from "@fastify/cors";
 import Fastify from "fastify";
 
 import {
+  CodexProductOwnerAgent,
   MockDeveloperAgent,
   MockProductOwnerAgent,
   MockQualityAssuranceAgent
 } from "@squad/agents";
+
 import { JsonlEventStore } from "@squad/event-store";
 import { Orchestrator } from "@squad/orchestrator";
 import {
@@ -18,9 +20,15 @@ import {
   WorkspaceManager
 } from "@squad/runner";
 
+import { CodexClient } from "@squad/codex-client";
+
 const repositoryRoot = path.resolve(
   fileURLToPath(new URL("../../../", import.meta.url))
 );
+
+dotenv.config({
+  path: path.join(repositoryRoot, ".env")
+});
 
 const runsDirectory = path.join(
   repositoryRoot,
@@ -50,8 +58,19 @@ const runner = new LocalRunner(
   generatedProjectsDirectory
 );
 
+const llmProvider = process.env.LLM_PROVIDER ?? "mock";
+
+const po =
+  llmProvider === "codex"
+    ? new CodexProductOwnerAgent(
+        new CodexClient(),
+        repositoryRoot,
+        process.env.LLM_MODEL || undefined
+      )
+    : new MockProductOwnerAgent();
+
 const orchestrator = new Orchestrator({
-  po: new MockProductOwnerAgent(),
+  po,
   developer: new MockDeveloperAgent(),
   qa: new MockQualityAssuranceAgent(),
   eventStore,
@@ -69,6 +88,7 @@ await app.register(cors, {
 
 app.get("/health", async () => ({
   status: "ok",
+  llmProvider,
   timestamp: new Date().toISOString()
 }));
 

@@ -13,6 +13,7 @@
   "dependencies": {
     "@fastify/cors": "^11.0.0",
     "@squad/agents": "*",
+    "@squad/codex-client": "*",
     "@squad/event-store": "*",
     "@squad/orchestrator": "*",
     "@squad/runner": "*",

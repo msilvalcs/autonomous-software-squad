@@ -1,8 +1,10 @@
-import type {
-  DeveloperResult,
-  QaResult,
-  UserStory
+import {
+  BacklogSchema,
+  type DeveloperResult,
+  type QaResult,
+  type UserStory
 } from "@squad/schemas";
+import type { CodexClient } from "@squad/codex-client";
 
 export interface ExecutionEvidence {
   command: string;
@@ -35,6 +37,115 @@ export interface QaInput {
 
 export interface QualityAssuranceAgent {
   validate(input: QaInput): Promise<QaResult>;
+}
+
+const backlogOutputSchema: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["stories"],
+  properties: {
+    stories: {
+      type: "array",
+      minItems: 1,
+      maxItems: 6,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "title",
+          "description",
+          "priority",
+          "acceptanceCriteria",
+          "status"
+        ],
+        properties: {
+          id: {
+            type: "string"
+          },
+          title: {
+            type: "string"
+          },
+          description: {
+            type: "string"
+          },
+          priority: {
+            type: "integer",
+            minimum: 1
+          },
+          acceptanceCriteria: {
+            type: "array",
+            minItems: 1,
+            items: {
+              type: "string"
+            }
+          },
+          status: {
+            type: "string",
+            enum: ["PENDING"]
+          }
+        }
+      }
+    }
+  }
+};
+
+export class CodexProductOwnerAgent
+  implements ProductOwnerAgent {
+  constructor(
+    private readonly client: CodexClient,
+    private readonly workingDirectory: string,
+    private readonly model?: string
+  ) { }
+
+  async createBacklog(
+    briefing: string
+  ): Promise<UserStory[]> {
+    if (briefing.trim() === "") {
+      throw new Error("Briefing cannot be empty");
+    }
+
+    const prompt = `
+Você é o Product Owner de um squad autônomo de software.
+
+Transforme o briefing do cliente em um backlog pequeno e executável.
+
+Regras:
+- Crie entre 1 e 6 user stories.
+- Use IDs sequenciais: US-001, US-002 e assim por diante.
+- Cada story deve ser pequena e independente.
+- A prioridade deve começar em 1.
+- Todos os critérios de aceitação devem ser objetivos e verificáveis.
+- O status inicial de todas as stories deve ser PENDING.
+- Não inclua funcionalidades fora do briefing.
+- Produza somente a estrutura solicitada pelo schema JSON.
+
+Briefing do cliente:
+${briefing}
+`.trim();
+
+    const result = await this.client.generate<unknown>({
+      prompt,
+      outputSchema: backlogOutputSchema,
+      workingDirectory: this.workingDirectory,
+      sandbox: "read-only",
+      timeoutMs: 300_000,
+      model: this.model
+    });
+
+    const backlog = BacklogSchema.parse(result.data);
+
+    return backlog.stories
+      .sort((first, second) =>
+        first.priority - second.priority
+      )
+      .map((story, index) => ({
+        ...story,
+        id: `US-${String(index + 1).padStart(3, "0")}`,
+        priority: index + 1,
+        status: "PENDING"
+      }));
+  }
 }
 
 export class MockProductOwnerAgent implements ProductOwnerAgent {
