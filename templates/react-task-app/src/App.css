@@ -1,0 +1,41 @@
+#root {
+  width: 100%;
+}
+
+.app {
+  width: min(680px, calc(100% - 32px));
+  margin: 48px auto;
+  font-family: system-ui, sans-serif;
+}
+
+form,
+section {
+  margin-top: 32px;
+  padding: 24px;
+  border: 1px solid #d8dee9;
+  border-radius: 12px;
+}
+
+.form-row {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+input {
+  flex: 1;
+  padding: 10px 12px;
+}
+
+button {
+  padding: 10px 16px;
+  cursor: pointer;
+}
+
+[role="alert"] {
+  color: #b42318;
+}
+
+li {
+  margin-block: 8px;
+}
