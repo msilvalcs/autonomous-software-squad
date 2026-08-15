@@ -1,6 +1,8 @@
 import {
+  access,
   mkdir,
   mkdtemp,
+  readFile,
   rm,
   writeFile
 } from "node:fs/promises";
@@ -10,6 +12,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   LocalRunner,
+  WorkspaceManager,
   type AllowedCommand
 } from "./index.js";
 
@@ -116,5 +119,105 @@ describe("LocalRunner", () => {
     ).rejects.toThrow(
       "timeoutMs must be greater than zero"
     );
+  });
+});
+
+describe("WorkspaceManager", () => {
+  it("copia o template sem node_modules e dist", async () => {
+    const rootDirectory = await mkdtemp(
+      path.join(tmpdir(), "squad-workspace-")
+    );
+
+    temporaryDirectories.push(rootDirectory);
+
+    const templateDirectory = path.join(
+      rootDirectory,
+      "template"
+    );
+
+    const generatedDirectory = path.join(
+      rootDirectory,
+      "generated"
+    );
+
+    await mkdir(
+      path.join(templateDirectory, "src"),
+      { recursive: true }
+    );
+
+    await mkdir(
+      path.join(templateDirectory, "node_modules"),
+      { recursive: true }
+    );
+
+    await mkdir(
+      path.join(templateDirectory, "dist"),
+      { recursive: true }
+    );
+
+    await writeFile(
+      path.join(templateDirectory, "src", "app.ts"),
+      "export const app = true;",
+      "utf8"
+    );
+
+    await writeFile(
+      path.join(templateDirectory, "node_modules", "ignored.js"),
+      "ignored",
+      "utf8"
+    );
+
+    await writeFile(
+      path.join(templateDirectory, "dist", "ignored.js"),
+      "ignored",
+      "utf8"
+    );
+
+    const manager = new WorkspaceManager({
+      templateDirectory,
+      generatedProjectsDirectory: generatedDirectory
+    });
+
+    const workspace = await manager.prepareWorkspace(
+      "run-001"
+    );
+
+    const copiedSource = await readFile(
+      path.join(workspace, "src", "app.ts"),
+      "utf8"
+    );
+
+    expect(copiedSource).toContain("app = true");
+
+    await expect(
+      access(path.join(workspace, "node_modules"))
+    ).rejects.toThrow();
+
+    await expect(
+      access(path.join(workspace, "dist"))
+    ).rejects.toThrow();
+  });
+
+  it("rejeita runId inseguro", async () => {
+    const rootDirectory = await mkdtemp(
+      path.join(tmpdir(), "squad-workspace-")
+    );
+
+    temporaryDirectories.push(rootDirectory);
+
+    const manager = new WorkspaceManager({
+      templateDirectory: path.join(
+        rootDirectory,
+        "template"
+      ),
+      generatedProjectsDirectory: path.join(
+        rootDirectory,
+        "generated"
+      )
+    });
+
+    await expect(
+      manager.prepareWorkspace("../../outside")
+    ).rejects.toThrow("Invalid runId");
   });
 });

@@ -1,4 +1,9 @@
 import { spawn } from "node:child_process";
+import {
+  cp,
+  mkdir,
+  rm
+} from "node:fs/promises";
 import path from "node:path";
 
 export type AllowedCommand =
@@ -129,5 +134,56 @@ export class LocalRunner {
     }
 
     return resolvedWorkspace;
+  }
+}
+
+export class WorkspaceManager {
+  private readonly templateDirectory: string;
+  private readonly generatedProjectsDirectory: string;
+
+  constructor(input: {
+    templateDirectory: string;
+    generatedProjectsDirectory: string;
+  }) {
+    this.templateDirectory = path.resolve(
+      input.templateDirectory
+    );
+
+    this.generatedProjectsDirectory = path.resolve(
+      input.generatedProjectsDirectory
+    );
+  }
+
+  async prepareWorkspace(runId: string): Promise<string> {
+    if (!/^[a-zA-Z0-9_-]+$/.test(runId)) {
+      throw new Error("Invalid runId");
+    }
+
+    const destination = path.join(
+      this.generatedProjectsDirectory,
+      runId
+    );
+
+    await mkdir(this.generatedProjectsDirectory, {
+      recursive: true
+    });
+
+    await rm(destination, {
+      recursive: true,
+      force: true
+    });
+
+    await cp(this.templateDirectory, destination, {
+      recursive: true,
+      filter: (source) => {
+        const segments = source.split(path.sep);
+
+        return !segments.some((segment) =>
+          ["node_modules", "dist", ".git"].includes(segment)
+        );
+      }
+    });
+
+    return destination;
   }
 }
