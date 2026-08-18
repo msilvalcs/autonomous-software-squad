@@ -19,6 +19,7 @@ import type {
 import { QaResultSchema } from "@squad/schemas";
 
 import type {
+  ExecutionBackend,
   ExecutionEnvironment,
   ExecutionRunner,
   WorkspaceManager
@@ -35,6 +36,7 @@ export interface OrchestratorDependencies {
     "prepareWorkspace"
   >;
   routingPolicy?: ModelRoutingPolicy;
+  isolationPolicy?: IsolationPolicy;
   storyPublisher?: StoryPublisher;
 }
 
@@ -55,6 +57,66 @@ export interface ModelRoutingPolicy {
     reason: string;
     assignments: ModelAssignment[];
   };
+}
+
+export interface IsolationDecision {
+  complexity: TaskComplexity;
+  requiredBackend: ExecutionBackend;
+  selectedBackend: ExecutionBackend;
+  allowed: boolean;
+  reason: string;
+}
+
+export interface IsolationPolicy {
+  evaluate(
+    complexity: TaskComplexity,
+    selectedBackend: ExecutionBackend
+  ): IsolationDecision;
+}
+
+export type IsolationMinimums = Partial<
+  Record<TaskComplexity, ExecutionBackend>
+>;
+
+const isolationRank: Record<ExecutionBackend, number> = {
+  local: 0,
+  docker: 1,
+  microvm: 2
+};
+
+export class MinimumIsolationPolicy implements IsolationPolicy {
+  private readonly minimums: Record<
+    TaskComplexity,
+    ExecutionBackend
+  >;
+
+  constructor(minimums: IsolationMinimums = {}) {
+    this.minimums = {
+      LOW: minimums.LOW ?? "local",
+      MEDIUM: minimums.MEDIUM ?? "local",
+      HIGH: minimums.HIGH ?? "local"
+    };
+  }
+
+  evaluate(
+    complexity: TaskComplexity,
+    selectedBackend: ExecutionBackend
+  ): IsolationDecision {
+    const requiredBackend = this.minimums[complexity];
+    const allowed =
+      isolationRank[selectedBackend] >=
+      isolationRank[requiredBackend];
+
+    return {
+      complexity,
+      requiredBackend,
+      selectedBackend,
+      allowed,
+      reason: allowed
+        ? `Backend ${selectedBackend} atende ao mínimo ${requiredBackend} para complexidade ${complexity}.`
+        : `Backend ${selectedBackend} é inferior ao mínimo ${requiredBackend} para complexidade ${complexity}.`
+    };
+  }
 }
 
 interface RouteConfig {
@@ -264,6 +326,9 @@ export class Orchestrator {
     const routing = (
       this.dependencies.routingPolicy ?? new DeterministicModelRouter()
     ).route(input.briefing);
+    const isolation = this.isolationDecision(
+      routing.complexity
+    );
 
     const workspacePath =
       await this.dependencies.workspaceManager.prepareWorkspace(
@@ -320,16 +385,12 @@ export class Orchestrator {
     await this.recordEvent(state, {
       actor: "ORCHESTRATOR",
       action: "EXECUTION_BACKEND_DECIDED",
-      message:
-        this.dependencies.runner.backend === "docker"
-          ? "Docker selecionado para isolar os comandos da run."
-          : "Runner local selecionado para compatibilidade de desenvolvimento.",
+      message: isolation.reason,
       metadata: {
         backend: this.dependencies.runner.backend,
-        reason:
-          this.dependencies.runner.backend === "docker"
-            ? "EXECUTION_MODE=docker ativa isolamento, limites e rede controlada."
-            : "O modo local é o padrão quando nenhum backend isolado é solicitado.",
+        requiredBackend: isolation.requiredBackend,
+        allowed: isolation.allowed,
+        reason: isolation.reason,
         policy: this.dependencies.runner.policy
       }
     });
@@ -371,6 +432,23 @@ export class Orchestrator {
     let environment: ExecutionEnvironment | undefined;
 
     try {
+      const isolation = this.isolationDecision(state.complexity);
+
+      if (!isolation.allowed) {
+        await this.recordEvent(state, {
+          actor: "ORCHESTRATOR",
+          action: "ISOLATION_REQUIREMENT_NOT_MET",
+          message: `${isolation.reason} A execução foi bloqueada sem fallback.`,
+          metadata: {
+            ...isolation,
+            retryable: false
+          }
+        });
+        throw new Error(
+          `${isolation.reason} No fallback was applied.`
+        );
+      }
+
       const preparationStartedAt = Date.now();
 
       try {
@@ -747,6 +825,18 @@ export class Orchestrator {
         }
       }
     }
+  }
+
+  private isolationDecision(
+    complexity: TaskComplexity
+  ): IsolationDecision {
+    return (
+      this.dependencies.isolationPolicy ??
+      new MinimumIsolationPolicy()
+    ).evaluate(
+      complexity,
+      this.dependencies.runner.backend
+    );
   }
 
   private async latestQaResult(

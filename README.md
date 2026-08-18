@@ -23,6 +23,7 @@ O projeto foi concebido para a **Trilha B — Squad Autônomo de Agentes** do Ha
 | Histórico e retomada | Funcional | Seleção persistida e continuação auditável |
 | GitHub Issues | Opcional | Stories publicadas com checklist e rastreabilidade |
 | Docker Runner | Funcional e opcional | Isola comandos npm sem substituir o fluxo local |
+| MicroVM | Avaliada, não operacional | Gate Firecracker fail-closed para risco alto |
 
 > PO, Developer e QA podem operar com Codex. O Developer altera somente a cópia isolada da aplicação, enquanto o QA inspeciona o resultado em modo somente leitura. Os mocks permanecem intencionalmente disponíveis como fallback de demonstração.
 
@@ -416,6 +417,38 @@ eventos de infraestrutura. Em Docker, a auditoria inclui tag, digest real da
 imagem, rede, limites e duração. O manifesto final expõe a mesma proveniência
 por uma allowlist sem segredos. Consulte
 `docs/decisions/ADR-009-environment-observability.md`.
+
+## Isolamento mínimo e microVM
+
+O Orquestrador compara a complexidade da run com o nível mínimo configurado:
+
+```text
+local < docker < microvm
+```
+
+Configure os mínimos por classe com:
+
+```env
+MINIMUM_ISOLATION_LOW=local
+MINIMUM_ISOLATION_MEDIUM=docker
+MINIMUM_ISOLATION_HIGH=microvm
+```
+
+Um backend inferior causa `ISOLATION_REQUIREMENT_NOT_MET` e a run falha antes
+da criação do ambiente. Não há fallback silencioso. Como o ciclo de vida
+Firecracker ainda não foi homologado, `EXECUTION_MODE=microvm` atua somente
+como gate e sempre bloqueia a execução, mesmo que o host passe no diagnóstico.
+
+Para avaliar o host sem instalar ou alterar componentes:
+
+```bash
+npm run microvm:check
+```
+
+O comando verifica Linux, acesso de leitura e escrita a `/dev/kvm`, caminhos
+absolutos executáveis de Firecracker e Jailer, além do kernel e rootfs guest.
+Consulte `docs/decisions/ADR-010-high-risk-microvm.md` para a comparação com
+Kata Containers e Docker e para os critérios objetivos de adoção pós-hackathon.
 
 Esta etapa isola os comandos npm. O Codex Developer ainda é executado no host.
 Containers por persona e microVMs permanecem como evoluções documentadas nos

@@ -25,6 +25,8 @@ Antes de modificar o projeto, considere:
   expõe o token às personas;
 - o backend Docker é opcional e o LocalRunner permanece como padrão do MVP;
 - o DockerRunner reutiliza um container por run e registra seu ciclo de vida;
+- a política de isolamento bloqueia backends inferiores ao mínimo configurado;
+- microVM é somente um gate experimental e não possui execução homologada;
 
 Não descreva uma funcionalidade planejada como já implementada.
 

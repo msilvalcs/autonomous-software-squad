@@ -20,12 +20,14 @@ import { JsonlEventStore } from "@squad/event-store";
 import { GitHubIssuesPublisher } from "@squad/github-issues";
 import {
   DeterministicModelRouter,
+  MinimumIsolationPolicy,
   Orchestrator,
   type RoutingOverrides
 } from "@squad/orchestrator";
 import {
   createExecutionRunner,
-  WorkspaceManager
+  WorkspaceManager,
+  type ExecutionBackend
 } from "@squad/runner";
 
 import { CodexClient } from "@squad/codex-client";
@@ -83,6 +85,12 @@ const runner = createExecutionRunner({
     image:
       process.env.DOCKER_RUNNER_IMAGE ??
       "autonomous-squad-runner:local"
+  },
+  microvm: {
+    firecrackerBinary: process.env.FIRECRACKER_BINARY,
+    jailerBinary: process.env.FIRECRACKER_JAILER_BINARY,
+    kernelImage: process.env.FIRECRACKER_KERNEL_IMAGE,
+    rootfsImage: process.env.FIRECRACKER_ROOTFS_IMAGE
   }
 });
 
@@ -94,6 +102,20 @@ const routingPolicy = new DeterministicModelRouter(
   routingOverrides,
   llmProvider
 );
+const isolationPolicy = new MinimumIsolationPolicy({
+  LOW: parseIsolationBackend(
+    process.env.MINIMUM_ISOLATION_LOW,
+    "MINIMUM_ISOLATION_LOW"
+  ),
+  MEDIUM: parseIsolationBackend(
+    process.env.MINIMUM_ISOLATION_MEDIUM,
+    "MINIMUM_ISOLATION_MEDIUM"
+  ),
+  HIGH: parseIsolationBackend(
+    process.env.MINIMUM_ISOLATION_HIGH,
+    "MINIMUM_ISOLATION_HIGH"
+  )
+});
 const githubIssuesPublisher = createGitHubIssuesPublisher();
 
 const [poPersona, developerPersona, qaPersona] = await Promise.all([
@@ -138,6 +160,7 @@ const orchestrator = new Orchestrator({
   runner,
   workspaceManager,
   routingPolicy,
+  isolationPolicy,
   storyPublisher: githubIssuesPublisher
 });
 
@@ -251,6 +274,17 @@ const documentationFiles = [
       "docs",
       "decisions",
       "ADR-009-environment-observability.md"
+    )
+  },
+  {
+    id: "high-risk-microvm",
+    title: "ADR-010: MicroVM para alto risco",
+    category: "Segurança",
+    path: path.join(
+      repositoryRoot,
+      "docs",
+      "decisions",
+      "ADR-010-high-risk-microvm.md"
     )
   },
   {
@@ -755,6 +789,23 @@ function parseRoutingOverrides(
   }
 
   return parsed as RoutingOverrides;
+}
+
+function parseIsolationBackend(
+  raw: string | undefined,
+  variable: string
+): ExecutionBackend | undefined {
+  if (!raw) {
+    return undefined;
+  }
+
+  if (raw === "local" || raw === "docker" || raw === "microvm") {
+    return raw;
+  }
+
+  throw new Error(
+    `${variable} must be local, docker or microvm`
+  );
 }
 
 function createEnvironmentProvenance(events: AuditEvent[]) {

@@ -13,6 +13,7 @@ import type { UserStory } from "@squad/schemas";
 
 import {
   DeterministicModelRouter,
+  MinimumIsolationPolicy,
   Orchestrator
 } from "./index.js";
 
@@ -32,6 +33,7 @@ async function createOrchestrator(
   options: {
     failDispose?: boolean;
     failPrepareOnce?: boolean;
+    minimumIsolationHigh?: "local" | "docker" | "microvm";
   } = {}
 ) {
   const directory = await mkdtemp(
@@ -117,6 +119,9 @@ async function createOrchestrator(
     eventStore,
     runner,
     workspaceManager,
+    isolationPolicy: new MinimumIsolationPolicy({
+      HIGH: options.minimumIsolationHigh
+    }),
     storyPublisher
   });
 
@@ -316,6 +321,36 @@ describe("Orchestrator", () => {
     );
   });
 
+  it("bloqueia risco alto quando o backend viola o isolamento mínimo", async () => {
+    const { orchestrator, eventStore, lifecycleCalls } =
+      await createOrchestrator(undefined, {
+        minimumIsolationHigh: "microvm"
+      });
+    const state = await orchestrator.createRun({
+      briefing:
+        "Criar autenticação com permissões, pagamento, banco de dados, " +
+        "integração externa em tempo real e validar todos os fluxos."
+    });
+
+    const finalState = await orchestrator.execute(state);
+    const events = await eventStore.listEvents(state.runId);
+
+    expect(state.complexity).toBe("HIGH");
+    expect(finalState.status).toBe("FAILED");
+    expect(lifecycleCalls).toHaveLength(0);
+    expect(
+      events.some(
+        (event) =>
+          event.action === "ISOLATION_REQUIREMENT_NOT_MET" &&
+          event.metadata?.requiredBackend === "microvm" &&
+          event.metadata?.selectedBackend === "local"
+      )
+    ).toBe(true);
+    expect(events.at(-1)?.message).toContain(
+      "No fallback was applied"
+    );
+  });
+
   it("retoma uma execução persistida sem repetir stories aprovadas", async () => {
     const { orchestrator, eventStore, executedCommands } =
       await createOrchestrator();
@@ -482,6 +517,22 @@ describe("DeterministicModelRouter", () => {
     ).toMatchObject({
       provider: "anthropic",
       model: "configured-opus-model"
+    });
+  });
+});
+
+describe("MinimumIsolationPolicy", () => {
+  it("aceita backend mais forte e nunca reduz o mínimo configurado", () => {
+    const policy = new MinimumIsolationPolicy({
+      MEDIUM: "docker",
+      HIGH: "microvm"
+    });
+
+    expect(policy.evaluate("MEDIUM", "microvm").allowed).toBe(true);
+    expect(policy.evaluate("HIGH", "docker")).toMatchObject({
+      allowed: false,
+      requiredBackend: "microvm",
+      selectedBackend: "docker"
     });
   });
 });

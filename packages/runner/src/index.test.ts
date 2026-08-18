@@ -13,9 +13,11 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  assessFirecrackerReadiness,
   createExecutionRunner,
   DockerRunner,
   LocalRunner,
+  MicroVmRunner,
   WorkspaceManager,
   type AllowedCommand
 } from "./index.js";
@@ -367,6 +369,17 @@ describe("createExecutionRunner", () => {
     ).toBe("docker");
   });
 
+  it("seleciona o gate de microVM sem degradar o backend", async () => {
+    const { baseDirectory } = await createWorkspace();
+
+    expect(
+      createExecutionRunner({
+        mode: "microvm",
+        baseDirectory
+      }).backend
+    ).toBe("microvm");
+  });
+
   it("falha para modo desconhecido sem fallback silencioso", async () => {
     const { baseDirectory } = await createWorkspace();
 
@@ -376,6 +389,48 @@ describe("createExecutionRunner", () => {
         baseDirectory
       })
     ).toThrow("Unsupported execution mode");
+  });
+});
+
+describe("Firecracker readiness", () => {
+  it("exige KVM, binários e assets guest confiáveis", async () => {
+    const { baseDirectory } = await createWorkspace();
+    const report = await assessFirecrackerReadiness({
+      kvmDevice: path.join(baseDirectory, "missing-kvm")
+    });
+
+    expect(report.ready).toBe(false);
+    expect(
+      report.checks
+        .filter((check) => !check.passed)
+        .map((check) => check.id)
+    ).toEqual(expect.arrayContaining([
+      "kvm-access",
+      "firecracker-binary",
+      "jailer-binary",
+      "guest-kernel",
+      "guest-rootfs"
+    ]));
+  });
+
+  it("bloqueia a execução sem fallback quando o host não está pronto", async () => {
+    const { baseDirectory, workspace } =
+      await createWorkspace();
+    const runner = new MicroVmRunner({
+      baseDirectory,
+      kvmDevice: path.join(baseDirectory, "missing-kvm")
+    });
+
+    await expect(runner.prepare(workspace)).rejects.toThrow(
+      "No fallback was applied"
+    );
+    expect(runner.policy).toMatchObject({
+      runtime: "microvm",
+      networkAccess: "none",
+      credentialAccess: "none",
+      privileged: false,
+      dockerSocket: false
+    });
   });
 });
 

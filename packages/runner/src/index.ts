@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { constants } from "node:fs";
 import {
+  access,
   cp,
   mkdir,
   readdir,
@@ -30,7 +32,7 @@ export interface ExecutionResult {
   timedOut: boolean;
 }
 
-export type ExecutionBackend = "local" | "docker";
+export type ExecutionBackend = "local" | "docker" | "microvm";
 
 export interface ExecutionEnvironment {
   backend: ExecutionBackend;
@@ -40,9 +42,9 @@ export interface ExecutionEnvironment {
 }
 
 export interface RunnerExecutionPolicy {
-  runtime: "local-process" | "docker-container";
+  runtime: "local-process" | "docker-container" | "microvm";
   workspaceAccess: "run-write";
-  networkAccess: "host" | "install-only";
+  networkAccess: "host" | "install-only" | "none";
   credentialAccess: "none";
   allowedCommands: AllowedCommand[];
   privileged: false;
@@ -576,10 +578,159 @@ export class DockerRunner implements ExecutionRunner {
   }
 }
 
+export interface FirecrackerReadinessOptions {
+  kvmDevice?: string;
+  firecrackerBinary?: string;
+  jailerBinary?: string;
+  kernelImage?: string;
+  rootfsImage?: string;
+}
+
+export interface FirecrackerReadinessCheck {
+  id:
+    | "linux-host"
+    | "kvm-access"
+    | "firecracker-binary"
+    | "jailer-binary"
+    | "guest-kernel"
+    | "guest-rootfs";
+  passed: boolean;
+  detail: string;
+}
+
+export interface FirecrackerReadinessReport {
+  ready: boolean;
+  checks: FirecrackerReadinessCheck[];
+}
+
+export async function assessFirecrackerReadiness(
+  options: FirecrackerReadinessOptions = {}
+): Promise<FirecrackerReadinessReport> {
+  const kvmDevice = options.kvmDevice ?? "/dev/kvm";
+  const checks: FirecrackerReadinessCheck[] = [{
+    id: "linux-host",
+    passed: process.platform === "linux",
+    detail:
+      process.platform === "linux"
+        ? "Host Linux detectado."
+        : `Firecracker requer Linux; plataforma atual: ${process.platform}.`
+  }];
+
+  checks.push(await pathAccessCheck(
+    "kvm-access",
+    kvmDevice,
+    constants.R_OK | constants.W_OK,
+    "Dispositivo KVM com leitura e escrita disponível."
+  ));
+  checks.push(await requiredAbsolutePathCheck(
+    "firecracker-binary",
+    options.firecrackerBinary,
+    constants.R_OK | constants.X_OK,
+    "Binário Firecracker executável e em caminho absoluto."
+  ));
+  checks.push(await requiredAbsolutePathCheck(
+    "jailer-binary",
+    options.jailerBinary,
+    constants.R_OK | constants.X_OK,
+    "Binário Jailer executável e em caminho absoluto."
+  ));
+  checks.push(await requiredAbsolutePathCheck(
+    "guest-kernel",
+    options.kernelImage,
+    constants.R_OK,
+    "Kernel guest legível e em caminho absoluto."
+  ));
+  checks.push(await requiredAbsolutePathCheck(
+    "guest-rootfs",
+    options.rootfsImage,
+    constants.R_OK,
+    "Rootfs guest legível e em caminho absoluto."
+  ));
+
+  return {
+    ready: checks.every((check) => check.passed),
+    checks
+  };
+}
+
+export interface MicroVmRunnerOptions
+  extends FirecrackerReadinessOptions {
+  baseDirectory: string;
+  cpuLimit?: number;
+  memoryLimit?: string;
+  pidsLimit?: number;
+}
+
+/**
+ * Gate experimental para Firecracker. Ele valida os pré-requisitos e sempre
+ * bloqueia antes da execução até que o adaptador de ciclo de vida seja
+ * implementado e homologado. Não existe delegação implícita para Docker/local.
+ */
+export class MicroVmRunner implements ExecutionRunner {
+  readonly backend = "microvm" as const;
+  private readonly baseDirectory: string;
+  private readonly readinessOptions: FirecrackerReadinessOptions;
+  readonly policy: RunnerExecutionPolicy;
+
+  constructor(options: MicroVmRunnerOptions) {
+    this.baseDirectory = path.resolve(options.baseDirectory);
+    this.readinessOptions = options;
+    this.policy = {
+      runtime: "microvm",
+      workspaceAccess: "run-write",
+      networkAccess: "none",
+      credentialAccess: "none",
+      allowedCommands: [...allowedCommands],
+      privileged: false,
+      dockerSocket: false,
+      limits: {
+        timeoutMs: 180_000,
+        cpu: options.cpuLimit ?? 1,
+        memory: options.memoryLimit ?? "1g",
+        pids: options.pidsLimit ?? 256
+      }
+    };
+  }
+
+  async prepare(workspace: string): Promise<ExecutionEnvironment> {
+    resolveAllowedWorkspace(this.baseDirectory, workspace);
+    const report = await assessFirecrackerReadiness(
+      this.readinessOptions
+    );
+
+    if (!report.ready) {
+      const failures = report.checks
+        .filter((check) => !check.passed)
+        .map((check) => check.id)
+        .join(", ");
+
+      throw new Error(
+        `MicroVM readiness check failed: ${failures}. No fallback was applied.`
+      );
+    }
+
+    throw new Error(
+      "MicroVM host is ready, but the Firecracker lifecycle adapter is not homologated. No fallback was applied."
+    );
+  }
+
+  async run(request: ExecutionRequest): Promise<ExecutionResult> {
+    resolveAllowedWorkspace(this.baseDirectory, request.workspace);
+    throw new Error(
+      "MicroVM execution is unavailable until the Firecracker lifecycle adapter is homologated."
+    );
+  }
+
+  async dispose(workspace: string): Promise<void> {
+    resolveAllowedWorkspace(this.baseDirectory, workspace);
+  }
+}
+
 export interface CreateExecutionRunnerOptions {
   mode?: string;
   baseDirectory: string;
   docker?: Omit<DockerRunnerOptions, "baseDirectory">;
+  microvm?: Omit<MicroVmRunnerOptions, "baseDirectory">;
 }
 
 export function createExecutionRunner(
@@ -598,9 +749,51 @@ export function createExecutionRunner(
     });
   }
 
+  if (mode === "microvm") {
+    return new MicroVmRunner({
+      ...options.microvm,
+      baseDirectory: options.baseDirectory
+    });
+  }
+
   throw new Error(
-    `Unsupported execution mode: ${mode}. Expected local or docker.`
+    `Unsupported execution mode: ${mode}. Expected local, docker or microvm.`
   );
+}
+
+async function pathAccessCheck(
+  id: FirecrackerReadinessCheck["id"],
+  target: string,
+  mode: number,
+  successDetail: string
+): Promise<FirecrackerReadinessCheck> {
+  try {
+    await access(target, mode);
+    return { id, passed: true, detail: successDetail };
+  } catch {
+    return {
+      id,
+      passed: false,
+      detail: `Caminho indisponível ou sem permissões necessárias: ${target}.`
+    };
+  }
+}
+
+async function requiredAbsolutePathCheck(
+  id: FirecrackerReadinessCheck["id"],
+  target: string | undefined,
+  mode: number,
+  successDetail: string
+): Promise<FirecrackerReadinessCheck> {
+  if (!target || !path.isAbsolute(target)) {
+    return {
+      id,
+      passed: false,
+      detail: "Um caminho absoluto confiável deve ser configurado."
+    };
+  }
+
+  return pathAccessCheck(id, target, mode, successDetail);
 }
 
 function resolveAllowedWorkspace(
