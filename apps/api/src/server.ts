@@ -499,16 +499,13 @@ app.get<{
     return reply;
   }
 
-  const publicBasePath =
-    `/api/runs/${request.params.runId}/artifact/files`;
-
   return reply
     .type("text/html; charset=utf-8")
     .header(
       "Content-Security-Policy",
       "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'"
     )
-    .send(await readPreviewIndex(artifact, publicBasePath));
+    .send(await readPreviewIndex(artifact, "files"));
 });
 
 app.get<{

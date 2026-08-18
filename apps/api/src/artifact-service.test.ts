@@ -79,9 +79,9 @@ describe("artifact service", () => {
     );
 
     await expect(
-      readPreviewIndex(artifact, "/api/runs/run-preview/artifact/files")
+      readPreviewIndex(artifact, "files")
     ).resolves.toContain(
-      'src="/api/runs/run-preview/artifact/files/assets/app.js"'
+      'src="files/assets/app.js"'
     );
   });
 

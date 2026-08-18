@@ -44,5 +44,7 @@ o arquivo completo em memória. A dependência fica restrita à API.
 - O avaliador consegue inspecionar e baixar a entrega no dashboard.
 - O preview usa o build que já passou pelo Runner e não executa o servidor de
   desenvolvimento do projeto gerado.
+- Assets usam URLs relativas controladas pela API, permitindo abrir o preview
+  diretamente ou pelo proxy do dashboard.
 - Arquivos ZIP são produzidos sob demanda e podem consumir CPU em artefatos
   grandes. O MVP gera projetos pequenos e sequenciais.
