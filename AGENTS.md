@@ -18,6 +18,7 @@ Antes de modificar o projeto, considere:
 - eventos são persistidos em JSONL e transmitidos por SSE;
 - cada execução utiliza uma cópia do template React;
 - execuções concluídas oferecem manifesto, preview isolado e download ZIP;
+- o GitHub Actions executa typecheck, testes e build sem credenciais de LLM;
 - Docker não faz parte do caminho principal do MVP.
 
 Não descreva uma funcionalidade planejada como já implementada.

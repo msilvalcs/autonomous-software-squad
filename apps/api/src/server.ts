@@ -170,6 +170,17 @@ const documentationFiles = [
       "ADR-003-artifact-delivery.md"
     )
   },
+  {
+    id: "continuous-integration",
+    title: "ADR-004: Integração contínua",
+    category: "Arquitetura",
+    path: path.join(
+      repositoryRoot,
+      "docs",
+      "decisions",
+      "ADR-004-continuous-integration.md"
+    )
+  },
   ...["PO", "DEV", "QA"].map((persona) => ({
     id: `persona-${persona.toLowerCase()}`,
     title: `Persona: ${persona}`,

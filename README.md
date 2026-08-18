@@ -19,6 +19,7 @@ O projeto foi concebido para a **Trilha B — Squad Autônomo de Agentes** do Ha
 | Roteamento de modelos | Funcional | Complexidade, provider, modelo e reasoning por persona |
 | Workspace isolado | Funcional | Uma cópia do template por execução |
 | Entrega do artefato | Funcional | Preview isolado, resumo e download ZIP |
+| Integração contínua | Funcional | Typecheck, testes e build no GitHub Actions |
 | Docker Runner | Planejado | Diferencial posterior ao MVP |
 
 > PO, Developer e QA podem operar com Codex. O Developer altera somente a cópia isolada da aplicação, enquanto o QA inspeciona o resultado em modo somente leitura. Os mocks permanecem intencionalmente disponíveis como fallback de demonstração.
@@ -344,6 +345,11 @@ npm run typecheck
 npm run build
 npm test
 ```
+
+O workflow `.github/workflows/ci.yml` executa os mesmos comandos em Ubuntu para
+pushes na `main`, pull requests e acionamentos manuais. O CI usa o provider
+mock e não depende de credenciais de LLM. Consulte
+`docs/decisions/ADR-004-continuous-integration.md`.
 
 Os testes cobrem atualmente:
 
