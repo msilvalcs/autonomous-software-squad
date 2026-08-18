@@ -142,6 +142,47 @@ textarea:focus {
   border: 1px solid #3b82f6;
 }
 
+.run-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 190px;
+  gap: 9px;
+}
+
+.run-action-completed {
+  color: #052e26;
+  background: #6ee7b7;
+  border-color: #6ee7b7;
+}
+
+.run-action-failed,
+.run-action-blocked {
+  color: #fca5a5;
+  border-color: #7f1d1d;
+}
+
+.button-spinner {
+  width: 15px;
+  height: 15px;
+  border: 2px solid rgb(191 219 254 / 35%);
+  border-top-color: #bfdbfe;
+  border-radius: 50%;
+  animation: button-spin 0.75s linear infinite;
+}
+
+@keyframes button-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button-spinner {
+    animation: none;
+  }
+}
+
 button {
   padding: 12px 20px;
   color: #052e26;

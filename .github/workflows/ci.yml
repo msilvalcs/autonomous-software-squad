@@ -54,9 +54,30 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v5
 
+      - name: Configure Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install monorepo dependencies
+        run: npm ci
+
       - name: Build pinned runner image
         run: >-
           docker build
           --file docker/runner.Dockerfile
           --tag autonomous-squad-runner:ci
           .
+
+      - name: Install template dependencies
+        run: npm ci --prefix templates/react-task-app
+
+      - name: Build packages for integration test
+        run: npm run build:packages
+
+      - name: Validate Developer to Docker Runner Playwright flow
+        env:
+          RUN_DOCKER_PLAYWRIGHT_INTEGRATION: "1"
+          DOCKER_RUNNER_IMAGE: autonomous-squad-runner:ci
+        run: npm run test:integration:docker -w @squad/orchestrator

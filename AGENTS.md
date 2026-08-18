@@ -27,6 +27,8 @@ Antes de modificar o projeto, considere:
 - o DockerRunner reutiliza um container por run e registra seu ciclo de vida;
 - a política de isolamento bloqueia backends inferiores ao mínimo configurado;
 - microVM é somente um gate experimental e não possui execução homologada;
+- o template possui Playwright e Chromium é provisionado na imagem Docker;
+- retomabilidade é calculada pela API e continua limitada por `maxAttempts`;
 
 Não descreva uma funcionalidade planejada como já implementada.
 
@@ -231,8 +233,13 @@ Comandos aceitos no MVP:
 npm install
 npm run build
 npm test
+npm run test:e2e
 npm run typecheck
 ```
+
+O Developer altera arquivos e solicita comandos na saída estruturada, mas não
+usa a execução desses comandos no host como condição de sucesso ou falha. A
+validação dependente do ambiente pertence ao Runner configurado para a run.
 
 Ao adicionar um comando:
 

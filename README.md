@@ -24,6 +24,7 @@ O projeto foi concebido para a **Trilha B — Squad Autônomo de Agentes** do Ha
 | GitHub Issues | Opcional | Stories publicadas com checklist e rastreabilidade |
 | Docker Runner | Funcional e opcional | Isola comandos npm sem substituir o fluxo local |
 | MicroVM | Avaliada, não operacional | Gate Firecracker fail-closed para risco alto |
+| Testes E2E | Funcional | Playwright em 1280 px e 375 px no Runner Docker |
 
 > PO, Developer e QA podem operar com Codex. O Developer altera somente a cópia isolada da aplicação, enquanto o QA inspeciona o resultado em modo somente leitura. Os mocks permanecem intencionalmente disponíveis como fallback de demonstração.
 
@@ -291,6 +292,12 @@ documentação permite consultar regras do projeto, ADRs e personas sem conceder
 acesso arbitrário ao filesystem: a API publica somente uma allowlist fixa de
 arquivos versionados, incluindo as skills aprovadas e suas licenças.
 
+A ação da execução acompanha o estado informado pela API: runs ativas exibem
+`Executando...`, falhas retomáveis exibem `Retomar execução` e runs concluídas
+exibem `Ver resultado`. Estados bloqueados ou falhas sem tentativa restante não
+oferecem uma ação inválida. A API, e não a timeline, define `active` e
+`canResume`.
+
 O histórico mantém a seleção após recarregar a página. Execuções interrompidas
 podem ser retomadas sem repetir stories aprovadas, e os eventos
 `RUN_RESUMED` e `STORY_RESUMED` registram a recuperação. A API aceita somente
@@ -400,6 +407,12 @@ capabilities, impede novos privilégios, aplica limites de CPU, memória e PIDs 
 usa root filesystem somente leitura. Build, typecheck e testes ficam sem rede;
 somente `npm install` recebe a rede configurada. O Docker socket nunca é
 montado dentro do container, e credenciais de LLM não são repassadas ao Runner.
+
+A imagem também contém Chromium Headless Shell fixado pela versão do Playwright.
+O template executa Vitest e Playwright por `npm test`, com projetos de 1280 px e
+375 px. O navegador usa apenas loopback, shared memory privada e permanece sem
+rede durante os testes. Consulte
+`docs/decisions/ADR-011-e2e-recovery-actions.md`.
 
 Cada run prepara um único container, reutiliza esse ambiente nas tentativas e
 o remove ao concluir, bloquear ou falhar. Início e descarte são registrados nos

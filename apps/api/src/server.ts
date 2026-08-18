@@ -19,6 +19,7 @@ import {
 import { JsonlEventStore } from "@squad/event-store";
 import { GitHubIssuesPublisher } from "@squad/github-issues";
 import {
+  canResumeRun,
   DeterministicModelRouter,
   MinimumIsolationPolicy,
   Orchestrator,
@@ -172,6 +173,12 @@ const activeExecutions = new Map<string, Promise<void>>();
 
 const documentationFiles = [
   {
+    id: "project-status",
+    title: "Estado do projeto e próximos passos",
+    category: "Governança",
+    path: path.join(repositoryRoot, "docs", "PROJECT_STATUS.md")
+  },
+  {
     id: "project-agents",
     title: "Regras do projeto",
     category: "Governança",
@@ -285,6 +292,17 @@ const documentationFiles = [
       "docs",
       "decisions",
       "ADR-010-high-risk-microvm.md"
+    )
+  },
+  {
+    id: "e2e-recovery-actions",
+    title: "ADR-011: E2E, retomada e ações por estado",
+    category: "Qualidade",
+    path: path.join(
+      repositoryRoot,
+      "docs",
+      "decisions",
+      "ADR-011-e2e-recovery-actions.md"
     )
   },
   {
@@ -409,20 +427,28 @@ app.get<{
     : 20;
   const states = await eventStore.listStates();
 
-  return states.slice(0, limit).map((state) => ({
-    runId: state.runId,
-    briefing: state.briefing,
-    status: state.status,
-    complexity: state.complexity,
-    storyCount: state.stories.length,
-    approvedStoryCount: state.stories.filter(
-      (story) => story.status === "PASSED"
-    ).length,
-    currentStoryId: state.currentStoryId,
-    createdAt: state.createdAt,
-    updatedAt: state.updatedAt,
-    active: activeExecutions.has(state.runId)
-  }));
+  return Promise.all(
+    states.slice(0, limit).map(async (state) => {
+      const active = activeExecutions.has(state.runId);
+      const events = await eventStore.listEvents(state.runId);
+
+      return {
+        runId: state.runId,
+        briefing: state.briefing,
+        status: state.status,
+        complexity: state.complexity,
+        storyCount: state.stories.length,
+        approvedStoryCount: state.stories.filter(
+          (story) => story.status === "PASSED"
+        ).length,
+        currentStoryId: state.currentStoryId,
+        createdAt: state.createdAt,
+        updatedAt: state.updatedAt,
+        active,
+        canResume: !active && canResumeRun(state, events)
+      };
+    })
+  );
 });
 
 app.get<{
@@ -440,7 +466,14 @@ app.get<{
     });
   }
 
-  return state;
+  const active = activeExecutions.has(state.runId);
+  const events = await eventStore.listEvents(state.runId);
+
+  return {
+    ...state,
+    active,
+    canResume: !active && canResumeRun(state, events)
+  };
 });
 
 app.post<{
@@ -463,25 +496,12 @@ app.post<{
     return reply.status(404).send({ error: "Run not found" });
   }
 
-  if (["COMPLETED", "BLOCKED"].includes(state.status)) {
+  const events = await eventStore.listEvents(state.runId);
+
+  if (!canResumeRun(state, events)) {
     return reply.status(409).send({
       error: "Run cannot be resumed from its current status"
     });
-  }
-
-  if (state.status === "FAILED") {
-    const events = await eventStore.listEvents(state.runId);
-    const retryable = [...events].reverse().some(
-      (event) =>
-        event.actor === "RUNNER" &&
-        event.metadata?.retryable === true
-    );
-
-    if (!retryable) {
-      return reply.status(409).send({
-        error: "Run cannot be resumed from its current status"
-      });
-    }
   }
 
   startExecution(state, true);

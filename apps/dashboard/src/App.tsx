@@ -24,6 +24,7 @@ import type {
   RunStatus,
   SquadConfiguration
 } from "./api/types";
+import { getRunAction } from "./run-action";
 import "./App.css";
 
 const terminalStatuses: RunStatus[] = [
@@ -53,6 +54,7 @@ function App() {
   const [artifact, setArtifact] = useState<ArtifactManifest | null>(null);
   const [runHistory, setRunHistory] = useState<RunSummary[]>([]);
   const [resuming, setResuming] = useState(false);
+  const [subscriptionVersion, setSubscriptionVersion] = useState(0);
 
   const refreshHistory = useCallback(async () => {
     try {
@@ -97,7 +99,11 @@ function App() {
   }, []);
 
   useEffect(() => {
-    void refreshHistory();
+    const refreshTimer = window.setTimeout(() => {
+      void refreshHistory();
+    }, 0);
+
+    return () => window.clearTimeout(refreshTimer);
   }, [refreshHistory]);
 
   useEffect(() => {
@@ -122,8 +128,12 @@ function App() {
 
     let active = true;
     let refreshTimer: number | undefined;
-    setEvents([]);
-    setArtifact(null);
+    const resetTimer = window.setTimeout(() => {
+      if (active) {
+        setEvents([]);
+        setArtifact(null);
+      }
+    }, 0);
 
     async function refreshRun() {
       try {
@@ -180,14 +190,14 @@ function App() {
 
     return () => {
       active = false;
+      window.clearTimeout(resetTimer);
       window.clearTimeout(refreshTimer);
       unsubscribe();
     };
-  }, [refreshHistory, runId]);
+  }, [refreshHistory, runId, subscriptionVersion]);
 
   useEffect(() => {
     if (!runId || run?.status !== "COMPLETED") {
-      setArtifact(null);
       return;
     }
 
@@ -248,7 +258,12 @@ function App() {
       setResuming(true);
       setError("");
       await resumeRun(runId);
-      await refreshHistory();
+      setSubscriptionVersion((current) => current + 1);
+      const [state] = await Promise.all([
+        getRun(runId),
+        refreshHistory()
+      ]);
+      setRun(state);
     } catch (caughtError) {
       setError(
         caughtError instanceof Error
@@ -285,23 +300,27 @@ function App() {
   const selectedDocument = documents.find(
     (document) => document.id === selectedDocumentId
   );
-  const selectedRunSummary = runHistory.find(
-    (item) => item.runId === runId
-  );
-  const retryableInfrastructureFailure =
-    run?.status === "FAILED" &&
-    events.some(
-      (event) =>
-        event.actor === "RUNNER" &&
-        event.metadata?.retryable === true
-    );
-  const canResume =
-    run !== null &&
-    (!terminalStatuses.includes(run.status) ||
-      retryableInfrastructureFailure) &&
-    selectedRunSummary?.active === false;
+  const hasActiveRun = runHistory.some((item) => item.active);
+  const runAction = getRunAction(run, resuming);
+  const visibleArtifact = artifact?.runId === runId
+    ? artifact
+    : null;
   const environmentDetails = getEnvironmentDetails(events);
   const executionPolicies = run?.executionPolicies ?? [];
+
+  function handleRunAction() {
+    if (runAction?.kind === "resume") {
+      void handleResume();
+      return;
+    }
+
+    if (runAction?.kind === "completed") {
+      document.getElementById("run-result")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start"
+      });
+    }
+  }
 
   return (
     <main className="dashboard">
@@ -332,7 +351,7 @@ function App() {
             onChange={(event) =>
               setBriefing(event.target.value)
             }
-            disabled={starting}
+            disabled={starting || hasActiveRun}
             rows={5}
           />
 
@@ -353,14 +372,17 @@ function App() {
               </select>
             </label>
 
-            {canResume && (
+            {runAction && (
               <button
                 type="button"
-                className="secondary-button"
-                disabled={resuming}
-                onClick={() => void handleResume()}
+                className={`secondary-button run-action run-action-${runAction.kind}`}
+                disabled={runAction.disabled}
+                onClick={handleRunAction}
               >
-                {resuming ? "Retomando..." : "Retomar execução"}
+                {runAction.kind === "running" && (
+                  <span className="button-spinner" aria-hidden="true" />
+                )}
+                {runAction.label}
               </button>
             )}
           </div>
@@ -372,10 +394,12 @@ function App() {
                 : "Nenhuma execução iniciada"}
             </span>
 
-            <button type="submit" disabled={starting}>
+            <button type="submit" disabled={starting || hasActiveRun}>
               {starting
                 ? "Iniciando..."
-                : "Iniciar squad"}
+                : hasActiveRun
+                  ? "Squad em execução..."
+                  : "Iniciar squad"}
             </button>
           </div>
 
@@ -646,7 +670,10 @@ function App() {
       </section>
 
       {finished && (
-        <section className={`result result-${run.status.toLowerCase()}`}>
+        <section
+          id="run-result"
+          className={`result result-${run.status.toLowerCase()}`}
+        >
           <div className="section-heading">
             <div>
               <span className="eyebrow">ENTREGA</span>
@@ -659,92 +686,92 @@ function App() {
             <StatusBadge status={run.status} />
           </div>
 
-          {artifact ? (
+          {visibleArtifact ? (
             <>
               <dl className="artifact-metrics">
                 <div>
                   <dt>Stories aprovadas</dt>
                   <dd>
-                    {artifact.summary.approvedStories}/{artifact.summary.stories}
+                    {visibleArtifact.summary.approvedStories}/{visibleArtifact.summary.stories}
                   </dd>
                 </div>
                 <div>
                   <dt>Decisões auditadas</dt>
-                  <dd>{artifact.summary.decisions}</dd>
+                  <dd>{visibleArtifact.summary.decisions}</dd>
                 </div>
                 <div>
                   <dt>Eventos</dt>
-                  <dd>{artifact.summary.events}</dd>
+                  <dd>{visibleArtifact.summary.events}</dd>
                 </div>
                 <div>
                   <dt>Duração</dt>
-                  <dd>{formatDuration(artifact.summary.durationMs)}</dd>
+                  <dd>{formatDuration(visibleArtifact.summary.durationMs)}</dd>
                 </div>
                 <div>
                   <dt>Pacote</dt>
                   <dd>
-                    {artifact.fileCount} arquivos · {formatBytes(artifact.totalBytes)}
+                    {visibleArtifact.fileCount} arquivos · {formatBytes(visibleArtifact.totalBytes)}
                   </dd>
                 </div>
               </dl>
 
-              {artifact.environmentProvenance && (
+              {visibleArtifact.environmentProvenance && (
                 <div className="artifact-provenance">
                   <div>
                     <span>Proveniência do ambiente</span>
                     <strong>
                       {formatBackend(
-                        artifact.environmentProvenance.backend ?? "unknown"
+                        visibleArtifact.environmentProvenance.backend ?? "unknown"
                       )}
                     </strong>
                   </div>
                   <div>
                     <span>Imagem</span>
                     <code>
-                      {artifact.environmentProvenance.image ?? "não aplicável"}
+                      {visibleArtifact.environmentProvenance.image ?? "não aplicável"}
                     </code>
                   </div>
                   <div>
                     <span>Digest</span>
                     <code>
-                      {artifact.environmentProvenance.imageDigest ??
+                      {visibleArtifact.environmentProvenance.imageDigest ??
                         "não aplicável"}
                     </code>
                   </div>
                   <p>
-                    {artifact.environmentProvenance.reason ??
+                    {visibleArtifact.environmentProvenance.reason ??
                       "Backend registrado pela auditoria da run."}
                   </p>
                 </div>
               )}
 
               <div className="artifact-actions">
-                {artifact.hasPreview && artifact.previewUrl && (
+                {visibleArtifact.hasPreview && visibleArtifact.previewUrl && (
                   <a
                     className="button-link button-link-secondary"
-                    href={artifact.previewUrl}
+                    href={visibleArtifact.previewUrl}
                     target="_blank"
                     rel="noreferrer"
                   >
                     Abrir em nova aba
                   </a>
                 )}
-                {artifact.downloadUrl && (
-                  <a className="button-link" href={artifact.downloadUrl}>
+                {visibleArtifact.downloadUrl && (
+                  <a className="button-link" href={visibleArtifact.downloadUrl}>
                     Baixar projeto .zip
                   </a>
                 )}
               </div>
 
-              {artifact.hasPreview && artifact.previewUrl && (
+              {visibleArtifact.hasPreview && visibleArtifact.previewUrl && (
                 <div className="artifact-preview">
                   <div className="preview-toolbar">
                     <span>PREVIEW DO ARTEFATO</span>
-                    <code>{artifact.runId}</code>
+                    <code>{visibleArtifact.runId}</code>
                   </div>
                   <iframe
                     title="Preview da aplicação gerada"
-                    src={artifact.previewUrl}
+                    src={visibleArtifact.previewUrl}
                     sandbox="allow-scripts"
                   />
                 </div>

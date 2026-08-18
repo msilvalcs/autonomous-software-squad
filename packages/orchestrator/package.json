@@ -8,7 +8,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run src"
+    "test": "vitest run src",
+    "test:integration:docker": "vitest run src/docker-playwright.integration.test.ts"
   },
   "dependencies": {
     "@squad/agents": "*",

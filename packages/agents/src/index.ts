@@ -131,6 +131,7 @@ const developerOutputSchema: Record<string, unknown> = {
           "npm install",
           "npm run build",
           "npm test",
+          "npm run test:e2e",
           "npm run typecheck"
         ]
       }
@@ -341,7 +342,13 @@ Regras obrigatorias:
 - Adicione ou atualize testes para o comportamento implementado.
 - Nao execute comandos destrutivos.
 - Os unicos comandos que podem ser solicitados na resposta sao:
-  npm install, npm run build, npm test e npm run typecheck.
+  npm install, npm run build, npm test, npm run test:e2e e npm run typecheck.
+- Nao execute npm, Playwright ou outros comandos dependentes do ambiente no
+  host. Implemente os arquivos e informe em commands quais validacoes o Runner
+  deve executar. Somente o resultado retornado pelo Runner determina se build
+  e testes passaram.
+- Para criterios visuais ou de interacao, adicione testes reais em e2e e
+  solicite npm run test:e2e. Playwright e Chromium sao provisionados no Runner.
 - Liste em changedFiles apenas caminhos relativos realmente alterados.
 - Se nao for possivel implementar com seguranca, retorne status FAILED e
   explique o motivo no summary.

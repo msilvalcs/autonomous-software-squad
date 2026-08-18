@@ -43,6 +43,8 @@ export interface RunState {
   workspacePath: string;
   createdAt: string;
   updatedAt: string;
+  active: boolean;
+  canResume: boolean;
 }
 
 export interface ExecutionPolicy {
@@ -160,4 +162,5 @@ export interface RunSummary {
   createdAt: string;
   updatedAt: string;
   active: boolean;
+  canResume: boolean;
 }

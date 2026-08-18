@@ -1,5 +1,10 @@
 FROM node:24.19.0-bookworm-slim@sha256:65932751ed4073ed02f5c04e494e4b2572a891b7dbea0568a863dc80341bf848
 
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+RUN npx --yes playwright@1.62.1 install --with-deps --only-shell chromium \
+  && chmod -R a+rX /ms-playwright
+
 ARG RUNNER_UID=10001
 ARG RUNNER_GID=10001
 

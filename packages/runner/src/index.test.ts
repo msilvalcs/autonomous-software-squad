@@ -284,6 +284,10 @@ describe("DockerRunner", () => {
     expect(args).toContain("--memory");
     expect(args).toContain("--cpus");
     expect(args).toContain("--pids-limit");
+    expect(args).toContain("--shm-size");
+    expect(args).toContain(
+      "PLAYWRIGHT_BROWSERS_PATH=/ms-playwright"
+    );
     expect(args).toContain("none");
     expect(args).toContain("squad-runner:test");
     expect(args.slice(-3)).toEqual(["npm", "run", "build"]);

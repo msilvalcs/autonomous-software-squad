@@ -184,6 +184,16 @@ describe("agentes simulados", () => {
       workingDirectory: workspacePath,
       sandbox: "workspace-write"
     });
+    const request = requests[0] as { prompt: string };
+    expect(request.prompt).toContain(
+      "Nao execute npm, Playwright ou outros comandos dependentes do ambiente no"
+    );
+    expect(request.prompt).toContain(
+      "Somente o resultado retornado pelo Runner determina se build"
+    );
+    expect(request.prompt).toContain(
+      "solicite npm run test:e2e"
+    );
   });
 
   it("bloqueia escalada de sandbox entre personas", () => {

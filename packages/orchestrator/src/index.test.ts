@@ -9,9 +9,13 @@ import {
   MockQualityAssuranceAgent
 } from "@squad/agents";
 import { JsonlEventStore } from "@squad/event-store";
-import type { UserStory } from "@squad/schemas";
+import type {
+  AuditEvent,
+  UserStory
+} from "@squad/schemas";
 
 import {
+  canResumeRun,
   DeterministicModelRouter,
   MinimumIsolationPolicy,
   Orchestrator
@@ -319,6 +323,51 @@ describe("Orchestrator", () => {
     await expect(orchestrator.resume(state)).rejects.toThrow(
       "cannot be resumed"
     );
+  });
+
+  it("permite retomar falha do Developer enquanto há tentativa restante", async () => {
+    const { orchestrator } = await createOrchestrator();
+    const state = await orchestrator.createRun({
+      briefing: "Criar uma aplicação para controle de tarefas.",
+      maxAttempts: 3
+    });
+    state.status = "FAILED";
+    state.currentStoryId = "US-002";
+    state.attempt = 2;
+
+    const events = [{
+      eventId: "evt-implementation-failed",
+      runId: state.runId,
+      timestamp: new Date().toISOString(),
+      actor: "DEV",
+      action: "IMPLEMENTATION_FAILED",
+      message: "Navegador indisponível.",
+      storyId: "US-002"
+    }] satisfies AuditEvent[];
+
+    expect(canResumeRun(state, events)).toBe(true);
+    state.attempt = 3;
+    expect(canResumeRun(state, events)).toBe(false);
+  });
+
+  it("não permite retomar violação do isolamento mínimo", async () => {
+    const { orchestrator } = await createOrchestrator();
+    const state = await orchestrator.createRun({
+      briefing: "Criar uma aplicação para controle de tarefas."
+    });
+    state.status = "FAILED";
+
+    const events = [{
+      eventId: "evt-isolation-failed",
+      runId: state.runId,
+      timestamp: new Date().toISOString(),
+      actor: "ORCHESTRATOR",
+      action: "ISOLATION_REQUIREMENT_NOT_MET",
+      message: "Isolamento mínimo não atendido.",
+      metadata: { retryable: false }
+    }] satisfies AuditEvent[];
+
+    expect(canResumeRun(state, events)).toBe(false);
   });
 
   it("bloqueia risco alto quando o backend viola o isolamento mínimo", async () => {

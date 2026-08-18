@@ -14,6 +14,7 @@ import path from "node:path";
 export type AllowedCommand =
   | "npm install"
   | "npm test"
+  | "npm run test:e2e"
   | "npm run build"
   | "npm run typecheck";
 
@@ -68,6 +69,7 @@ export interface ExecutionRunner {
 const commandArguments: Record<AllowedCommand, string[]> = {
   "npm install": ["install"],
   "npm test": ["test"],
+  "npm run test:e2e": ["run", "test:e2e"],
   "npm run build": ["run", "build"],
   "npm run typecheck": ["run", "typecheck"]
 };
@@ -94,7 +96,8 @@ const llmCredentialVariables = [
 
 export function createRunnerEnvironment(
   source: NodeJS.ProcessEnv,
-  homeDirectory: string
+  homeDirectory: string,
+  playwrightBrowsersPath?: string
 ): NodeJS.ProcessEnv {
   const environment: NodeJS.ProcessEnv = {
     ...source,
@@ -102,6 +105,11 @@ export function createRunnerEnvironment(
     HOME: homeDirectory,
     XDG_CONFIG_HOME: homeDirectory
   };
+
+  if (playwrightBrowsersPath) {
+    environment.PLAYWRIGHT_BROWSERS_PATH =
+      playwrightBrowsersPath;
+  }
 
   for (const variable of llmCredentialVariables) {
     delete environment[variable];
@@ -128,9 +136,16 @@ export class LocalRunner implements ExecutionRunner {
     }
   };
   private readonly baseDirectory: string;
+  private readonly playwrightBrowsersPath: string;
 
   constructor(baseDirectory: string) {
     this.baseDirectory = path.resolve(baseDirectory);
+    this.playwrightBrowsersPath = path.resolve(
+      this.baseDirectory,
+      "..",
+      ".cache",
+      "ms-playwright"
+    );
   }
 
   async prepare(workspace: string): Promise<ExecutionEnvironment> {
@@ -177,7 +192,11 @@ export class LocalRunner implements ExecutionRunner {
       const child = spawn("npm", args, {
         cwd: workspace,
         shell: false,
-        env: createRunnerEnvironment(process.env, runnerHome)
+        env: createRunnerEnvironment(
+          process.env,
+          runnerHome,
+          this.playwrightBrowsersPath
+        )
       });
 
       const timeout = setTimeout(() => {
@@ -469,6 +488,8 @@ export class DockerRunner implements ExecutionRunner {
       "--user",
       `${userId}:${groupId}`,
       "--read-only",
+      "--shm-size",
+      "268435456",
       "--tmpfs",
       "/tmp:rw,noexec,nosuid,size=268435456",
       "--cap-drop",
@@ -488,7 +509,9 @@ export class DockerRunner implements ExecutionRunner {
       "--env",
       "HOME=/tmp",
       "--env",
-      "NPM_CONFIG_CACHE=/tmp/.npm"
+      "NPM_CONFIG_CACHE=/tmp/.npm",
+      "--env",
+      "PLAYWRIGHT_BROWSERS_PATH=/ms-playwright"
     ];
   }
 
@@ -543,6 +566,8 @@ export class DockerRunner implements ExecutionRunner {
           "HOME=/tmp",
           "--env",
           "NPM_CONFIG_CACHE=/tmp/.npm",
+          "--env",
+          "PLAYWRIGHT_BROWSERS_PATH=/ms-playwright",
           containerName,
           "npm",
           ...command

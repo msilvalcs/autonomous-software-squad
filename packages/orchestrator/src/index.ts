@@ -312,6 +312,44 @@ export interface CreateRunInput {
   maxAttempts?: number;
 }
 
+export function canResumeRun(
+  state: RunState,
+  events: AuditEvent[]
+): boolean {
+  if (["COMPLETED", "BLOCKED"].includes(state.status)) {
+    return false;
+  }
+
+  if (state.status !== "FAILED") {
+    return true;
+  }
+
+  if (
+    state.currentStoryId !== null &&
+    state.attempt >= state.maxAttempts
+  ) {
+    return false;
+  }
+
+  const latestFailure = [...events].reverse().find(
+    (event) =>
+      event.action === "ISOLATION_REQUIREMENT_NOT_MET" ||
+      event.action === "IMPLEMENTATION_FAILED" ||
+      event.action === "EXECUTION_ENVIRONMENT_CREATION_FAILED" ||
+      event.action === "EXECUTION_ENVIRONMENT_CLEANUP_FAILED"
+  );
+
+  if (!latestFailure) {
+    return false;
+  }
+
+  if (latestFailure.action === "IMPLEMENTATION_FAILED") {
+    return true;
+  }
+
+  return latestFailure.metadata?.retryable === true;
+}
+
 export class Orchestrator {
   constructor(
     private readonly dependencies: OrchestratorDependencies
@@ -403,23 +441,12 @@ export class Orchestrator {
   }
 
   async resume(state: RunState): Promise<RunState> {
-    if (["COMPLETED", "BLOCKED"].includes(state.status)) {
+    const events = await this.dependencies.eventStore.listEvents(
+      state.runId
+    );
+
+    if (!canResumeRun(state, events)) {
       throw new Error(`Run ${state.runId} cannot be resumed`);
-    }
-
-    if (state.status === "FAILED") {
-      const events = await this.dependencies.eventStore.listEvents(
-        state.runId
-      );
-      const retryable = [...events].reverse().some(
-        (event) =>
-          event.actor === "RUNNER" &&
-          event.metadata?.retryable === true
-      );
-
-      if (!retryable) {
-        throw new Error(`Run ${state.runId} cannot be resumed`);
-      }
     }
 
     return this.run(state, true);
