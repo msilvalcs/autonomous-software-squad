@@ -178,6 +178,10 @@ describe("Orchestrator", () => {
         (event) => event.action === "MODEL_ROUTING_DECIDED"
       )
     ).toBe(true);
+    expect(
+      events.find((event) => event.action === "TESTS_COMPLETED")
+        ?.metadata?.stdout
+    ).toContain("Command passed");
 
     expect(initialState.executionPolicies).toHaveLength(4);
     expect(

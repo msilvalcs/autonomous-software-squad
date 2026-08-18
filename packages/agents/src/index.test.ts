@@ -133,8 +133,43 @@ describe("agentes simulados", () => {
 
     expect(result.status).toBe("FAIL");
     expect(result.summary).toContain("Build");
-    expect(result.requestedChanges).toContain(
+    expect(result.requestedChanges[0]).toContain(
       "Corrigir os erros de build e testes automatizados."
+    );
+  });
+
+  it("o QA devolve ao Developer a falha capturada no stdout", async () => {
+    const story = (await new MockProductOwnerAgent().createBacklog(
+      "Aplicação"
+    )).stories[0];
+
+    if (!story) {
+      throw new Error("Story was not created");
+    }
+
+    const implementation = await new MockDeveloperAgent().implement({
+      story,
+      previousQaResult: null,
+      workspacePath
+    });
+    const qa = new CodexQualityAssuranceAgent({} as never);
+    const result = await qa.validate({
+      story,
+      implementation,
+      build: successfulBuild,
+      tests: {
+        ...successfulTests,
+        exitCode: 1,
+        stdout: "Error: expect(locator).toHaveText failed"
+      },
+      workspacePath
+    });
+
+    expect(result.requestedChanges[0]).toContain(
+      "expect(locator).toHaveText failed"
+    );
+    expect(result.criteria[0]?.evidence).toContain(
+      "npm test falhou com exit code 1"
     );
   });
 

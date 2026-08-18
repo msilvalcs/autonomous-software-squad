@@ -488,10 +488,7 @@ ${formatEvidence(input.tests)}
 }
 
 function failedAutomationResult(input: QaInput): QaResult {
-  const evidence = [
-    input.build.stderr,
-    input.tests.stderr
-  ].filter(Boolean).join("\n") || "Build ou testes automatizados falharam.";
+  const evidence = automationFailureEvidence(input);
 
   return {
     storyId: input.story.id,
@@ -503,7 +500,7 @@ function failedAutomationResult(input: QaInput): QaResult {
       evidence
     })),
     requestedChanges: [
-      "Corrigir os erros de build e testes automatizados."
+      `Corrigir os erros de build e testes automatizados.\n\n${evidence}`
     ],
     decisions: [{
       decision: "Reprovar a story antes da análise semântica.",
@@ -511,6 +508,30 @@ function failedAutomationResult(input: QaInput): QaResult {
       alternativesConsidered: ["Consultar o modelo mesmo com automação quebrada"]
     }]
   };
+}
+
+function automationFailureEvidence(input: QaInput): string {
+  const failures = [input.build, input.tests].filter(
+    (result) => result.exitCode !== 0 || result.timedOut
+  );
+
+  if (failures.length === 0) {
+    return "Build ou testes automatizados falharam.";
+  }
+
+  return failures.map((result) => {
+    const output = [result.stderr, result.stdout]
+      .filter((value) => value.trim() !== "")
+      .join("\n")
+      .slice(-4_000);
+    const status = result.timedOut
+      ? "timeout"
+      : `exit code ${result.exitCode ?? "unknown"}`;
+
+    return output === ""
+      ? `${result.command} falhou com ${status}.`
+      : `${result.command} falhou com ${status}:\n${output}`;
+  }).join("\n\n");
 }
 
 function formatEvidence(evidence: ExecutionEvidence): string {

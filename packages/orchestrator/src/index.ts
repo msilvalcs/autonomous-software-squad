@@ -675,6 +675,7 @@ export class Orchestrator {
               exitCode: build.exitCode,
               durationMs: build.durationMs,
               timedOut: build.timedOut,
+              stdout: build.stdout.slice(-2_000),
               stderr: build.stderr.slice(0, 2_000)
             })
           });
@@ -700,6 +701,7 @@ export class Orchestrator {
               exitCode: tests.exitCode,
               durationMs: tests.durationMs,
               timedOut: tests.timedOut,
+              stdout: tests.stdout.slice(-4_000),
               stderr: tests.stderr.slice(0, 2_000)
             })
           });
