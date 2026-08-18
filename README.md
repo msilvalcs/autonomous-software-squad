@@ -382,6 +382,11 @@ docker build \
   .
 ```
 
+Para atualizar a base, obtenha o digest da nova versão oficial, altere a linha
+`FROM` em `docker/runner.Dockerfile` e confirme o build no CI. Para rollback,
+restaure o digest anterior versionado no Git e reconstrua a mesma tag local ou
+configure `DOCKER_RUNNER_IMAGE` com uma tag interna previamente validada.
+
 Depois configure:
 
 ```env
