@@ -12,14 +12,16 @@ O projeto foi concebido para a **Trilha B — Squad Autônomo de Agentes** do Ha
 | API | Funcional | Fastify |
 | Orquestrador | Funcional | Máquina de estados determinística |
 | Product Owner | Integrado com IA | Codex CLI autenticado pelo ChatGPT |
-| Developer | Simulado | Retorna implementação e correção previsíveis |
-| QA | Simulado | Reprova a primeira tentativa e aprova a correção |
+| Developer | Integrado com IA | Codex CLI com escrita restrita ao workspace da execução |
+| QA | Integrado com IA | Codex CLI em modo somente leitura e evidências por critério |
 | Build e testes | Reais | Executados pelo Local Runner |
 | Auditoria | Funcional | `state.json` e `events.jsonl` |
+| Roteamento de modelos | Funcional | Complexidade, provider, modelo e reasoning por persona |
 | Workspace isolado | Funcional | Uma cópia do template por execução |
+| Entrega do artefato | Funcional | Preview isolado, resumo e download ZIP |
 | Docker Runner | Planejado | Diferencial posterior ao MVP |
 
-> O PO já gera stories de acordo com o briefing usando o Codex. O Developer e o QA reais ainda fazem parte do roadmap. Os mocks permanecem intencionalmente disponíveis como fallback de demonstração.
+> PO, Developer e QA podem operar com Codex. O Developer altera somente a cópia isolada da aplicação, enquanto o QA inspeciona o resultado em modo somente leitura. Os mocks permanecem intencionalmente disponíveis como fallback de demonstração.
 
 ## Fluxo principal
 
@@ -41,6 +43,10 @@ flowchart TD
 
 ## Agentes
 
+Cada agente carrega sua persona versionada em `prompts/personas`. As saídas
+incluem uma lista estruturada de decisões com justificativa e alternativas
+consideradas. O Orquestrador persiste essas decisões na auditoria.
+
 ### Product Owner
 
 - interpreta o briefing;
@@ -57,7 +63,10 @@ flowchart TD
 - implementa ou corrige a funcionalidade no workspace da execução;
 - informa arquivos alterados e comandos necessários.
 
-Atualmente esse agente está simulado. A versão real com Codex é o próximo marco.
+Quando `LLM_PROVIDER=codex`, esse agente usa o Codex com sandbox
+`workspace-write`, limitado à cópia da execução. Sua saída é validada por
+schema e caminhos absolutos ou contendo `..` são rejeitados. O resumo, os
+arquivos alterados e os comandos solicitados ficam registrados na auditoria.
 
 ### Quality Assurance
 
@@ -67,7 +76,11 @@ Atualmente esse agente está simulado. A versão real com Codex é o próximo ma
 - retorna `PASS` ou `FAIL`;
 - informa as correções necessárias.
 
-Atualmente a decisão semântica é simulada, mas build e testes são executados de verdade.
+Quando `LLM_PROVIDER=codex`, o QA inspeciona o workspace em sandbox
+`read-only` e devolve uma evidência para cada critério de aceitação. Build ou
+testes quebrados causam reprovação determinística sem consultar o modelo. O
+resultado só pode ser `PASS` quando todos os critérios passam, e o relatório
+completo fica registrado na auditoria.
 
 ## Máquina de estados
 
@@ -86,6 +99,23 @@ stateDiagram-v2
 ```
 
 O orquestrador, e não outro modelo de linguagem, decide as transições mecânicas. Isso torna o fluxo previsível, testável e auditável.
+
+## Roteamento por complexidade
+
+Antes do planejamento, o Orquestrador classifica o briefing como `LOW`,
+`MEDIUM` ou `HIGH` usando sinais determinísticos e auditáveis. Em seguida,
+seleciona provider, modelo e reasoning effort para PO, Developer e QA.
+
+Defaults com o provider Codex:
+
+| Complexidade | PO | Developer | QA |
+|---|---|---|---|
+| LOW | Luna, low | Luna, low | Luna, low |
+| MEDIUM | Terra, medium | Luna, medium | Terra, high |
+| HIGH | Sol, high | Sol, high | Sol, xhigh |
+
+O evento `MODEL_ROUTING_DECIDED` registra a classificação, todas as rotas e a
+justificativa. Consulte `docs/decisions/ADR-001-model-routing.md`.
 
 ## Arquitetura do repositório
 
@@ -164,6 +194,7 @@ O arquivo `.env` deve conter:
 ```env
 LLM_PROVIDER=codex
 LLM_MODEL=
+MODEL_ROUTING_CONFIG=
 LLM_API_KEY=
 EXECUTION_MODE=local
 MAX_QA_ATTEMPTS=3
@@ -172,6 +203,11 @@ PORT=3000
 ```
 
 Não versione `.env`, credenciais ou arquivos internos de autenticação do Codex.
+
+`MODEL_ROUTING_CONFIG` aceita JSON para sobrescrever uma rota específica. Um
+provider externo precisa estar previamente configurado em
+`~/.codex/config.toml`. O projeto não possui providers Anthropic configurados
+por padrão e não presume nomes de modelos externos.
 
 ## Execução
 
@@ -212,11 +248,41 @@ listar os registros e filtrar por estado. O código patrimonial deve ser único.
 | Método | Endpoint | Responsabilidade |
 |---|---|---|
 | `GET` | `/health` | Saúde da API e provedor configurado |
+| `GET` | `/documentation` | Documentos permitidos para leitura no dashboard |
 | `POST` | `/runs` | Criar e iniciar uma execução |
 | `GET` | `/runs/:runId` | Consultar o estado atual |
 | `GET` | `/runs/:runId/events` | Consultar o histórico completo |
 | `GET` | `/runs/:runId/stream` | Acompanhar eventos por SSE |
-| `GET` | `/runs/:runId/artifact` | Consultar o workspace resultante |
+| `GET` | `/runs/:runId/artifact` | Consultar manifesto e resumo da entrega |
+| `GET` | `/runs/:runId/artifact/preview` | Abrir o build validado da aplicação |
+| `GET` | `/runs/:runId/artifact/download` | Baixar o projeto em ZIP |
+
+O endpoint de saúde também informa `llmModel`. Depois que uma execução começa,
+o dashboard exibe em cada cartão o provider, modelo e reasoning effort
+efetivamente selecionados pelo Orquestrador.
+
+O dashboard também oferece filtros por ator e texto na timeline. A seção de
+documentação permite consultar regras do projeto, ADRs e personas sem conceder
+acesso arbitrário ao filesystem: a API publica somente uma allowlist fixa de
+arquivos versionados.
+
+Quando a execução termina com sucesso, a seção de entrega mostra stories
+aprovadas, decisões, eventos, duração e tamanho do pacote. O preview usa apenas
+o conteúdo de `dist` e o download exclui `.git` e `node_modules`. Caminhos e
+links simbólicos são validados antes de qualquer arquivo ser publicado.
+
+## Skills
+
+Skills externas são válidas, mas devem ser adotadas de forma gradual. O fluxo
+prevê skills específicas por persona, sem instalar catálogos completos:
+
+- PO: modelagem de domínio e decomposição de tickets;
+- Developer: TDD, diagnóstico e design de código;
+- QA: code review e diagnóstico em modo somente leitura.
+
+Cada skill precisa de revisão de licença, `SKILL.md`, scripts, permissões e
+gatilhos antes de ser versionada em `.agents/skills`. Consulte
+`docs/decisions/ADR-002-agent-skills.md`.
 
 ## Auditabilidade
 
@@ -290,11 +356,11 @@ Os testes cobrem atualmente:
 - allowlist do Runner;
 - proteção do diretório de execução;
 - preparação dos workspaces.
+- proteção de caminhos, links simbólicos e arquivos do artefato.
 
 ## Limitações conhecidas
 
-- Developer e QA ainda não utilizam Codex para julgamento real;
-- o Developer simulado ainda não modifica o produto conforme cada briefing;
+- o modo mock do Developer não modifica o produto conforme cada briefing;
 - o template inicial é uma aplicação React de tarefas;
 - a execução é sequencial;
 - o Local Runner oferece controle, mas não isolamento forte como um container;
@@ -304,15 +370,14 @@ Os testes cobrem atualmente:
 
 ## Roadmap
 
-1. implementar `CodexDeveloperAgent` com escrita limitada ao workspace;
-2. implementar `CodexQualityAssuranceAgent` com evidências por critério;
-3. externalizar e versionar todos os prompts;
-4. transmitir logs do Codex para a timeline;
-5. permitir abrir ou baixar a aplicação gerada;
-6. melhorar o modo watch dos pacotes internos;
-7. adicionar retomada de execuções interrompidas;
-8. criar `DockerRunner` opcional;
-9. adicionar autenticação e persistência em banco, caso o produto evolua.
+1. transmitir logs do Codex para a timeline;
+2. calibrar o roteamento com métricas de qualidade, latência e consumo;
+3. revisar e incorporar um conjunto mínimo de skills em `.agents/skills`;
+4. melhorar o modo watch dos pacotes internos;
+5. adicionar retomada de execuções interrompidas;
+6. criar integração opcional para publicar stories como GitHub Issues;
+7. criar `DockerRunner` opcional;
+8. adicionar autenticação e persistência em banco, caso o produto evolua.
 
 ## Demonstração sugerida
 
@@ -324,7 +389,7 @@ Os testes cobrem atualmente:
 6. mostrar uma reprovação do QA;
 7. mostrar a correção automática e aprovação;
 8. abrir `events.jsonl` e demonstrar a auditoria;
-9. apresentar o workspace criado para a execução;
+9. abrir o preview e baixar o ZIP do projeto;
 10. explicar as limitações atuais e o próximo marco.
 
 ## Decisões principais

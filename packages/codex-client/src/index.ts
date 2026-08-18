@@ -15,6 +15,8 @@ export interface CodexRequest {
   sandbox?: "read-only" | "workspace-write";
   timeoutMs?: number;
   model?: string;
+  provider?: string;
+  reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max";
 }
 
 export interface CodexResult<T> {
@@ -64,6 +66,20 @@ export class CodexClient {
 
     if (request.model) {
       args.push("--model", request.model);
+    }
+
+    if (request.provider && request.provider !== "codex") {
+      args.push(
+        "--config",
+        `model_provider=${JSON.stringify(request.provider)}`
+      );
+    }
+
+    if (request.reasoningEffort) {
+      args.push(
+        "--config",
+        `model_reasoning_effort=${JSON.stringify(request.reasoningEffort)}`
+      );
     }
 
     args.push(request.prompt);

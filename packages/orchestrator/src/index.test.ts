@@ -10,7 +10,10 @@ import {
 } from "@squad/agents";
 import { JsonlEventStore } from "@squad/event-store";
 
-import { Orchestrator } from "./index.js";
+import {
+  DeterministicModelRouter,
+  Orchestrator
+} from "./index.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -77,6 +80,8 @@ describe("Orchestrator", () => {
     const finalState =
       await orchestrator.execute(initialState);
 
+    expect(finalState.complexity).toBe("LOW");
+    expect(finalState.modelAssignments).toHaveLength(3);
     expect(finalState.status).toBe("COMPLETED");
     expect(finalState.currentStoryId).toBeNull();
 
@@ -92,6 +97,18 @@ describe("Orchestrator", () => {
 
     expect(
       events.some(
+        (event) => event.action === "MODEL_ROUTING_DECIDED"
+      )
+    ).toBe(true);
+
+    expect(
+      events.some(
+        (event) => event.action === "IMPLEMENTATION_COMPLETED"
+      )
+    ).toBe(true);
+
+    expect(
+      events.some(
         (event) => event.action === "STORY_REJECTED"
       )
     ).toBe(true);
@@ -101,6 +118,12 @@ describe("Orchestrator", () => {
         (event) => event.action === "STORY_APPROVED"
       )
     ).toBe(true);
+
+    const approval = events.find(
+      (event) => event.action === "STORY_APPROVED"
+    );
+
+    expect(approval?.metadata?.criteria).toBeInstanceOf(Array);
 
     expect(
       events.at(-1)?.action
@@ -115,5 +138,46 @@ describe("Orchestrator", () => {
         briefing: "   "
       })
     ).rejects.toThrow("Briefing cannot be empty");
+  });
+});
+
+describe("DeterministicModelRouter", () => {
+  it("seleciona uma rota de alta capacidade para briefing complexo", () => {
+    const router = new DeterministicModelRouter();
+    const result = router.route(
+      "Criar autenticação com permissões, pagamento, banco de dados, " +
+      "integração externa em tempo real e validar todos os fluxos."
+    );
+
+    expect(result.complexity).toBe("HIGH");
+    expect(
+      result.assignments.find((item) => item.agent === "QA")
+    ).toMatchObject({
+      model: "gpt-5.6-sol",
+      reasoningEffort: "xhigh"
+    });
+  });
+
+  it("aplica override de provider por persona e complexidade", () => {
+    const router = new DeterministicModelRouter({
+      MEDIUM: {
+        PO: {
+          provider: "anthropic",
+          model: "configured-opus-model",
+          reasoningEffort: "medium"
+        }
+      }
+    });
+    const result = router.route(
+      "Criar aplicação para cadastrar, listar e filtrar equipamentos."
+    );
+
+    expect(result.complexity).toBe("MEDIUM");
+    expect(
+      result.assignments.find((item) => item.agent === "PO")
+    ).toMatchObject({
+      provider: "anthropic",
+      model: "configured-opus-model"
+    });
   });
 });

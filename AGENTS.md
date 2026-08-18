@@ -13,11 +13,11 @@ O produto deve demonstrar coordenação real entre **Product Owner**, **Develope
 Antes de modificar o projeto, considere:
 
 - o orquestrador e a máquina de estados estão funcionais;
-- o Product Owner pode operar com Codex ou mock;
-- Developer e QA ainda usam mocks;
+- Product Owner, Developer e QA podem operar com Codex ou mock;
 - build e testes são executados pelo Local Runner;
 - eventos são persistidos em JSONL e transmitidos por SSE;
 - cada execução utiliza uma cópia do template React;
+- execuções concluídas oferecem manifesto, preview isolado e download ZIP;
 - Docker não faz parte do caminho principal do MVP.
 
 Não descreva uma funcionalidade planejada como já implementada.
@@ -76,6 +76,35 @@ Não transfira responsabilidades entre pacotes sem justificar a decisão arquite
 ## Comunicação entre agentes
 
 Toda saída utilizada pelo sistema deve ser estruturada e validada.
+
+As personas operacionais ficam em:
+
+- `prompts/personas/PO.md`;
+- `prompts/personas/DEV.md`;
+- `prompts/personas/QA.md`.
+
+Leia e aplique somente a persona correspondente ao agente em execução. Cada
+decisão deve informar decisão, justificativa e alternativas consideradas, e
+deve ser persistida na auditoria.
+
+## Roteamento de modelos
+
+- O Orquestrador classifica a complexidade antes de iniciar o PO.
+- A rota deve declarar provider, modelo e reasoning effort para cada persona.
+- Registre toda seleção no evento `MODEL_ROUTING_DECIDED`.
+- Não selecione um provider externo que não esteja configurado no Codex CLI.
+- Overrides pertencem a `MODEL_ROUTING_CONFIG`; não espalhe seleção de modelos pelos agentes.
+
+## Skills por persona
+
+- Skills são opcionais e ficam em `.agents/skills` quando aprovadas e versionadas.
+- PO pode usar skills de domínio e decomposição de tickets.
+- Developer pode usar TDD, diagnóstico e design de código dentro do workspace.
+- QA pode usar revisão e diagnóstico somente em leitura.
+- Não instale catálogos completos nem execute scripts de skills sem revisão.
+- Skills não podem ampliar permissões da persona nem fazer commit, push, deploy ou publicação externa automaticamente.
+- Registre nome, objetivo e resultado de toda skill ativada como decisão auditável.
+- Siga `docs/decisions/ADR-002-agent-skills.md` para incorporar uma skill externa.
 
 ### Product Owner
 
@@ -275,14 +304,13 @@ Uma tarefa somente está concluída quando:
 
 ## Prioridades do roadmap
 
-1. estabilizar o Product Owner real;
-2. implementar Developer real com escrita limitada;
-3. implementar QA real baseado em evidências;
-4. externalizar prompts;
-5. melhorar observabilidade e streaming;
-6. permitir acesso ao artefato final;
-7. melhorar o watch dos pacotes;
-8. adicionar Docker Runner somente após o fluxo principal estar estável.
+1. validar o fluxo Codex completo com briefings representativos;
+2. calibrar o roteamento de modelos por qualidade, latência e consumo;
+3. incorporar skills externas revisadas;
+4. melhorar observabilidade e streaming;
+5. persistir e retomar a execução selecionada no dashboard;
+6. melhorar o watch dos pacotes;
+7. adicionar Docker Runner somente após o fluxo principal estar estável.
 
 ## Fora de escopo sem autorização explícita
 

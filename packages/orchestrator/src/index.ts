@@ -8,8 +8,12 @@ import type {
 import type { JsonlEventStore } from "@squad/event-store";
 import type {
   AuditEvent,
+  AgentRole,
+  ModelAssignment,
   QaResult,
-  RunState
+  ReasoningEffort,
+  RunState,
+  TaskComplexity
 } from "@squad/schemas";
 
 import type {
@@ -27,6 +31,137 @@ export interface OrchestratorDependencies {
     WorkspaceManager,
     "prepareWorkspace"
   >;
+  routingPolicy?: ModelRoutingPolicy;
+}
+
+export interface ModelRoutingPolicy {
+  route(briefing: string): {
+    complexity: TaskComplexity;
+    reason: string;
+    assignments: ModelAssignment[];
+  };
+}
+
+interface RouteConfig {
+  provider: string;
+  model: string | null;
+  reasoningEffort: ReasoningEffort;
+}
+
+export type RoutingOverrides = Partial<
+  Record<
+    TaskComplexity,
+    Partial<Record<AgentRole, Partial<RouteConfig>>>
+  >
+>;
+
+export class DeterministicModelRouter implements ModelRoutingPolicy {
+  constructor(
+    private readonly overrides: RoutingOverrides = {},
+    private readonly defaultProvider = "codex"
+  ) { }
+
+  route(briefing: string) {
+    const classification = classifyComplexity(briefing);
+    const roles: AgentRole[] = ["PO", "DEV", "QA"];
+
+    return {
+      complexity: classification.complexity,
+      reason: classification.reason,
+      assignments: roles.map((agent) => {
+        const defaults = defaultRoute(
+          classification.complexity,
+          agent,
+          this.defaultProvider
+        );
+        const override = this.overrides[classification.complexity]?.[agent];
+        const selected = { ...defaults, ...override };
+
+        return {
+          agent,
+          complexity: classification.complexity,
+          ...selected,
+          reason: `${classification.reason} Rota ${agent}: ${selected.provider}/${selected.model ?? "default"} com esforço ${selected.reasoningEffort}.`
+        };
+      })
+    };
+  }
+}
+
+function classifyComplexity(briefing: string): {
+  complexity: TaskComplexity;
+  reason: string;
+} {
+  const normalized = briefing.toLowerCase();
+  const highRiskSignals = [
+    "autenticação",
+    "authentication",
+    "pagamento",
+    "payment",
+    "tempo real",
+    "real-time",
+    "banco de dados",
+    "database",
+    "integração externa",
+    "external integration",
+    "multi-tenant",
+    "permissões"
+  ].filter((signal) => normalized.includes(signal));
+  const featureSignals = (
+    normalized.match(/\b(deve|permitir|cadastrar|listar|filtrar|integrar|validar)\b/g)
+    ?? []
+  ).length;
+  const score =
+    highRiskSignals.length * 3 +
+    Math.min(featureSignals, 6) +
+    (briefing.length > 1_200 ? 3 : briefing.length > 600 ? 1 : 0);
+
+  if (score >= 9) {
+    return {
+      complexity: "HIGH",
+      reason: `Complexidade alta: score ${score}; sinais críticos: ${highRiskSignals.join(", ") || "escopo extenso"}.`
+    };
+  }
+
+  if (score <= 2 && briefing.length < 350) {
+    return {
+      complexity: "LOW",
+      reason: `Complexidade baixa: score ${score}; briefing curto e sem sinais críticos.`
+    };
+  }
+
+  return {
+    complexity: "MEDIUM",
+    reason: `Complexidade média: score ${score}; múltiplas decisões, sem risco suficiente para rota alta.`
+  };
+}
+
+function defaultRoute(
+  complexity: TaskComplexity,
+  agent: AgentRole,
+  provider: string
+): RouteConfig {
+  if (provider === "mock") {
+    return { provider, model: null, reasoningEffort: "low" };
+  }
+
+  if (complexity === "LOW") {
+    return { provider, model: "gpt-5.6-luna", reasoningEffort: "low" };
+  }
+
+  if (complexity === "HIGH") {
+    return {
+      provider,
+      model: "gpt-5.6-sol",
+      reasoningEffort: agent === "QA" ? "xhigh" : "high"
+    };
+  }
+
+  return {
+    provider,
+    model: agent === "DEV" ? "gpt-5.6-luna" : "gpt-5.6-terra",
+    reasoningEffort: agent === "QA" ? "high" : "medium"
+  };
 }
 
 export interface CreateRunInput {
@@ -45,6 +180,9 @@ export class Orchestrator {
     }
 
     const runId = `run-${randomUUID()}`;
+    const routing = (
+      this.dependencies.routingPolicy ?? new DeterministicModelRouter()
+    ).route(input.briefing);
 
     const workspacePath =
       await this.dependencies.workspaceManager.prepareWorkspace(
@@ -60,6 +198,8 @@ export class Orchestrator {
       currentStoryId: null,
       attempt: 0,
       maxAttempts: input.maxAttempts ?? 3,
+      complexity: routing.complexity,
+      modelAssignments: routing.assignments,
       stories: [],
       workspacePath,
       createdAt: now,
@@ -72,6 +212,16 @@ export class Orchestrator {
       actor: "CLIENT",
       action: "RUN_CREATED",
       message: "Execução criada a partir do briefing."
+    });
+
+    await this.recordEvent(state, {
+      actor: "ORCHESTRATOR",
+      action: "MODEL_ROUTING_DECIDED",
+      message: routing.reason,
+      metadata: {
+        complexity: routing.complexity,
+        assignments: routing.assignments
+      }
     });
 
     return state;
@@ -87,15 +237,19 @@ export class Orchestrator {
         message: "PO iniciou a análise do briefing."
       });
 
-      state.stories =
-        await this.dependencies.po.createBacklog(state.briefing);
+      const backlog = await this.dependencies.po.createBacklog(
+        state.briefing,
+        this.assignmentFor(state, "PO")
+      );
+      state.stories = backlog.stories;
 
       await this.recordEvent(state, {
         actor: "PO",
         action: "STORIES_CREATED",
         message: `${state.stories.length} stories foram criadas.`,
         metadata: {
-          storyIds: state.stories.map((story) => story.id)
+          storyIds: state.stories.map((story) => story.id),
+          decisions: backlog.decisions
         }
       });
 
@@ -166,8 +320,32 @@ export class Orchestrator {
           const implementation =
             await this.dependencies.developer.implement({
               story,
-              previousQaResult
+              previousQaResult,
+              workspacePath: state.workspacePath,
+              assignment: this.assignmentFor(state, "DEV")
             });
+
+          await this.recordEvent(state, {
+            actor: "DEV",
+            action:
+              implementation.status === "IMPLEMENTED"
+                ? "IMPLEMENTATION_COMPLETED"
+                : "IMPLEMENTATION_FAILED",
+            message: implementation.summary,
+            storyId: story.id,
+            metadata: {
+              attempt: state.attempt,
+              changedFiles: implementation.changedFiles,
+              requestedCommands: implementation.commands,
+              decisions: implementation.decisions
+            }
+          });
+
+          if (implementation.status === "FAILED") {
+            throw new Error(
+              `Developer failed to implement ${story.id}: ${implementation.summary}`
+            );
+          }
 
           const build = await this.dependencies.runner.run({
             workspace: state.workspacePath,
@@ -237,7 +415,9 @@ export class Orchestrator {
               story,
               implementation,
               build,
-              tests
+              tests,
+              workspacePath: state.workspacePath,
+              assignment: this.assignmentFor(state, "QA")
             });
 
           if (qaResult.status === "PASS") {
@@ -249,7 +429,10 @@ export class Orchestrator {
               message: `${story.id} foi aprovada.`,
               storyId: story.id,
               metadata: {
-                attempt: state.attempt
+                attempt: state.attempt,
+                summary: qaResult.summary,
+                criteria: qaResult.criteria,
+                decisions: qaResult.decisions
               }
             });
 
@@ -266,7 +449,10 @@ export class Orchestrator {
             storyId: story.id,
             metadata: {
               attempt: state.attempt,
-              requestedChanges: qaResult.requestedChanges
+              summary: qaResult.summary,
+              criteria: qaResult.criteria,
+              requestedChanges: qaResult.requestedChanges,
+              decisions: qaResult.decisions
             }
           });
         }
@@ -324,6 +510,15 @@ export class Orchestrator {
   ): Promise<void> {
     state.status = status;
     await this.persistState(state);
+  }
+
+  private assignmentFor(
+    state: RunState,
+    agent: AgentRole
+  ): ModelAssignment | undefined {
+    return state.modelAssignments.find(
+      (assignment) => assignment.agent === agent
+    );
   }
 
   private async persistState(state: RunState): Promise<void> {

@@ -1,5 +1,45 @@
 import { z } from "zod";
 
+export const TaskComplexitySchema = z.enum([
+  "LOW",
+  "MEDIUM",
+  "HIGH"
+]);
+
+export type TaskComplexity = z.infer<typeof TaskComplexitySchema>;
+
+export const AgentRoleSchema = z.enum(["PO", "DEV", "QA"]);
+export type AgentRole = z.infer<typeof AgentRoleSchema>;
+
+export const ReasoningEffortSchema = z.enum([
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max"
+]);
+
+export type ReasoningEffort = z.infer<typeof ReasoningEffortSchema>;
+
+export const AgentDecisionSchema = z.object({
+  decision: z.string().min(1),
+  rationale: z.string().min(1),
+  alternativesConsidered: z.array(z.string().min(1)).default([])
+});
+
+export type AgentDecision = z.infer<typeof AgentDecisionSchema>;
+
+export const ModelAssignmentSchema = z.object({
+  agent: AgentRoleSchema,
+  provider: z.string().min(1),
+  model: z.string().min(1).nullable(),
+  reasoningEffort: ReasoningEffortSchema,
+  complexity: TaskComplexitySchema,
+  reason: z.string().min(1)
+});
+
+export type ModelAssignment = z.infer<typeof ModelAssignmentSchema>;
+
 export const StoryStatusSchema = z.enum([
   "PENDING",
   "DEVELOPING",
@@ -21,7 +61,8 @@ export const UserStorySchema = z.object({
 export type UserStory = z.infer<typeof UserStorySchema>;
 
 export const BacklogSchema = z.object({
-  stories: z.array(UserStorySchema).min(1).max(6)
+  stories: z.array(UserStorySchema).min(1).max(6),
+  decisions: z.array(AgentDecisionSchema).default([])
 });
 
 export type Backlog = z.infer<typeof BacklogSchema>;
@@ -31,7 +72,8 @@ export const DeveloperResultSchema = z.object({
   summary: z.string().min(1),
   changedFiles: z.array(z.string()),
   commands: z.array(z.string()),
-  status: z.enum(["IMPLEMENTED", "FAILED"])
+  status: z.enum(["IMPLEMENTED", "FAILED"]),
+  decisions: z.array(AgentDecisionSchema).default([])
 });
 
 export type DeveloperResult = z.infer<typeof DeveloperResultSchema>;
@@ -47,7 +89,8 @@ export const QaResultSchema = z.object({
   status: z.enum(["PASS", "FAIL"]),
   summary: z.string().min(1),
   criteria: z.array(QaCriterionSchema),
-  requestedChanges: z.array(z.string())
+  requestedChanges: z.array(z.string()),
+  decisions: z.array(AgentDecisionSchema).default([])
 });
 
 export type QaResult = z.infer<typeof QaResultSchema>;
@@ -69,6 +112,8 @@ export const RunStateSchema = z.object({
   currentStoryId: z.string().nullable(),
   attempt: z.number().int().nonnegative(),
   maxAttempts: z.number().int().positive(),
+  complexity: TaskComplexitySchema.default("MEDIUM"),
+  modelAssignments: z.array(ModelAssignmentSchema).default([]),
   stories: z.array(UserStorySchema),
   workspacePath: z.string().min(1),
   createdAt: z.string().datetime(),

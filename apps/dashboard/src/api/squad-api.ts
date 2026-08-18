@@ -1,10 +1,33 @@
 import type {
+  ArtifactManifest,
   AuditEvent,
   CreateRunResponse,
-  RunState
+  ProjectDocument,
+  RunState,
+  SquadConfiguration
 } from "./types";
 
 const API_BASE_URL = "/api";
+
+export async function getSquadConfiguration(): Promise<SquadConfiguration> {
+  const response = await fetch(`${API_BASE_URL}/health`);
+
+  if (!response.ok) {
+    throw new Error("Não foi possível consultar a configuração do squad.");
+  }
+
+  return response.json() as Promise<SquadConfiguration>;
+}
+
+export async function getDocumentation(): Promise<ProjectDocument[]> {
+  const response = await fetch(`${API_BASE_URL}/documentation`);
+
+  if (!response.ok) {
+    throw new Error("Não foi possível consultar a documentação.");
+  }
+
+  return response.json() as Promise<ProjectDocument[]>;
+}
 
 export async function createRun(
   briefing: string
@@ -39,6 +62,20 @@ export async function getRun(
   }
 
   return response.json() as Promise<RunState>;
+}
+
+export async function getArtifact(
+  runId: string
+): Promise<ArtifactManifest> {
+  const response = await fetch(
+    `${API_BASE_URL}/runs/${runId}/artifact`
+  );
+
+  if (!response.ok) {
+    throw new Error("Não foi possível consultar o artefato final.");
+  }
+
+  return response.json() as Promise<ArtifactManifest>;
 }
 
 export function subscribeToEvents(

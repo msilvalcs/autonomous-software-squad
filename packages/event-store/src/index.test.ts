@@ -68,6 +68,8 @@ describe("JsonlEventStore", () => {
       currentStoryId: null,
       attempt: 0,
       maxAttempts: 3,
+      complexity: "MEDIUM",
+      modelAssignments: [],
       stories: [],
       workspacePath: "generated-projects/run-001",
       createdAt: now,
