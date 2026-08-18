@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import {
   cp,
   mkdir,
+  readdir,
   rm
 } from "node:fs/promises";
 import path from "node:path";
@@ -140,10 +141,12 @@ export class LocalRunner {
 export class WorkspaceManager {
   private readonly templateDirectory: string;
   private readonly generatedProjectsDirectory: string;
+  private readonly approvedSkillsDirectory?: string;
 
   constructor(input: {
     templateDirectory: string;
     generatedProjectsDirectory: string;
+    approvedSkillsDirectory?: string;
   }) {
     this.templateDirectory = path.resolve(
       input.templateDirectory
@@ -152,11 +155,19 @@ export class WorkspaceManager {
     this.generatedProjectsDirectory = path.resolve(
       input.generatedProjectsDirectory
     );
+
+    this.approvedSkillsDirectory = input.approvedSkillsDirectory
+      ? path.resolve(input.approvedSkillsDirectory)
+      : undefined;
   }
 
   async prepareWorkspace(runId: string): Promise<string> {
     if (!/^[a-zA-Z0-9_-]+$/.test(runId)) {
       throw new Error("Invalid runId");
+    }
+
+    if (this.approvedSkillsDirectory) {
+      await assertNoSymbolicLinks(this.approvedSkillsDirectory);
     }
 
     const destination = path.join(
@@ -184,6 +195,28 @@ export class WorkspaceManager {
       }
     });
 
+    if (this.approvedSkillsDirectory) {
+      await cp(
+        this.approvedSkillsDirectory,
+        path.join(destination, ".agents", "skills"),
+        { recursive: true }
+      );
+    }
+
     return destination;
+  }
+}
+
+async function assertNoSymbolicLinks(directory: string): Promise<void> {
+  const entries = await readdir(directory, { withFileTypes: true });
+
+  for (const entry of entries) {
+    if (entry.isSymbolicLink()) {
+      throw new Error("Approved skills cannot contain symbolic links");
+    }
+
+    if (entry.isDirectory()) {
+      await assertNoSymbolicLinks(path.join(directory, entry.name));
+    }
   }
 }

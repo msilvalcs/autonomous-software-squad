@@ -4,6 +4,7 @@ import {
   mkdtemp,
   readFile,
   rm,
+  symlink,
   writeFile
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -139,6 +140,10 @@ describe("WorkspaceManager", () => {
       rootDirectory,
       "generated"
     );
+    const approvedSkillsDirectory = path.join(
+      rootDirectory,
+      "approved-skills"
+    );
 
     await mkdir(
       path.join(templateDirectory, "src"),
@@ -152,6 +157,10 @@ describe("WorkspaceManager", () => {
 
     await mkdir(
       path.join(templateDirectory, "dist"),
+      { recursive: true }
+    );
+    await mkdir(
+      path.join(approvedSkillsDirectory, "tdd"),
       { recursive: true }
     );
 
@@ -172,10 +181,16 @@ describe("WorkspaceManager", () => {
       "ignored",
       "utf8"
     );
+    await writeFile(
+      path.join(approvedSkillsDirectory, "tdd", "SKILL.md"),
+      "---\nname: tdd\ndescription: Test first.\n---",
+      "utf8"
+    );
 
     const manager = new WorkspaceManager({
       templateDirectory,
-      generatedProjectsDirectory: generatedDirectory
+      generatedProjectsDirectory: generatedDirectory,
+      approvedSkillsDirectory
     });
 
     const workspace = await manager.prepareWorkspace(
@@ -188,6 +203,19 @@ describe("WorkspaceManager", () => {
     );
 
     expect(copiedSource).toContain("app = true");
+
+    await expect(
+      readFile(
+        path.join(
+          workspace,
+          ".agents",
+          "skills",
+          "tdd",
+          "SKILL.md"
+        ),
+        "utf8"
+      )
+    ).resolves.toContain("name: tdd");
 
     await expect(
       access(path.join(workspace, "node_modules"))
@@ -219,5 +247,34 @@ describe("WorkspaceManager", () => {
     await expect(
       manager.prepareWorkspace("../../outside")
     ).rejects.toThrow("Invalid runId");
+  });
+
+  it("rejeita links simbólicos nas skills aprovadas", async () => {
+    const rootDirectory = await mkdtemp(
+      path.join(tmpdir(), "squad-workspace-")
+    );
+
+    temporaryDirectories.push(rootDirectory);
+
+    const templateDirectory = path.join(rootDirectory, "template");
+    const approvedSkillsDirectory = path.join(rootDirectory, "skills");
+    const outsideFile = path.join(rootDirectory, "outside.md");
+    await mkdir(templateDirectory);
+    await mkdir(approvedSkillsDirectory);
+    await writeFile(outsideFile, "outside", "utf8");
+    await symlink(
+      outsideFile,
+      path.join(approvedSkillsDirectory, "unsafe.md")
+    );
+
+    const manager = new WorkspaceManager({
+      templateDirectory,
+      generatedProjectsDirectory: path.join(rootDirectory, "generated"),
+      approvedSkillsDirectory
+    });
+
+    await expect(
+      manager.prepareWorkspace("run-001")
+    ).rejects.toThrow("cannot contain symbolic links");
   });
 });

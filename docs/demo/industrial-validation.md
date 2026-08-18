@@ -70,6 +70,22 @@ das skills utilizadas. Não houve reprovação nessa execução: o QA aprovou to
 as stories na primeira tentativa. Essa informação é mantida para não apresentar
 um ciclo corretivo artificial como evidência real.
 
+## Evidência de carregamento no workspace
+
+Depois de identificar que as execuções anteriores usavam fallback local para
+as skills do Developer, a execução
+`run-cfc5ea43-da3e-4afc-8824-d0d5adc1e7d2` validou a cópia controlada:
+
+- complexidade `LOW`, com PO, Developer e QA em `gpt-5.6-luna`, esforço low;
+- os quatro `SKILL.md` aprovados estavam presentes no workspace isolado e não
+  havia links simbólicos;
+- o Developer registrou `Skill tdd` como aplicada, sem mensagem de fallback;
+- o QA registrou por que `diagnosing-bugs` não precisava ser ativada;
+- 1 de 1 story aprovada em 14 eventos.
+
+Essa execução confirma tanto a ativação positiva quanto a decisão negativa
+auditável de uma skill.
+
 ## Roteiro de apresentação
 
 1. Explique o briefing de qualidade e rastreabilidade industrial.

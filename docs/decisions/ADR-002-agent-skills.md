@@ -40,6 +40,11 @@ curta e sem recursos executáveis. Instruções interativas presentes nas skills
 externas não interrompem uma execução: a persona escolhe a opção conservadora,
 respeita seu sandbox e registra a decisão.
 
+Antes de iniciar uma execução, o Workspace Manager copia as skills aprovadas
+para `.agents/skills` no workspace gerado. Isso torna as instruções detectáveis
+por Developer e QA sem ampliar o sandbox para a raiz do repositório. A origem é
+validada recursivamente e qualquer link simbólico bloqueia a preparação.
+
 ## Critérios para incorporar uma skill
 
 - licença compatível;

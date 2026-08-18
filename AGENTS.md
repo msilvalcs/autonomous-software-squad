@@ -104,6 +104,7 @@ deve ser persistida na auditoria.
 ## Skills por persona
 
 - Skills são opcionais e ficam em `.agents/skills` quando aprovadas e versionadas.
+- O Workspace Manager copia esse conjunto revisado para o workspace de cada execução; não crie links simbólicos dentro das skills.
 - PO usa `backlog-decomposition` para decomposição auditável do briefing.
 - Developer pode usar TDD, diagnóstico e design de código dentro do workspace.
 - QA pode usar diagnóstico somente em leitura.

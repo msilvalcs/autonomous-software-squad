@@ -68,7 +68,12 @@ const eventStore = new JsonlEventStore(runsDirectory);
 
 const workspaceManager = new WorkspaceManager({
   templateDirectory,
-  generatedProjectsDirectory
+  generatedProjectsDirectory,
+  approvedSkillsDirectory: path.join(
+    repositoryRoot,
+    ".agents",
+    "skills"
+  )
 });
 
 const runner = new LocalRunner(

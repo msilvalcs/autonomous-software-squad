@@ -315,6 +315,11 @@ fluxo automático. Toda ativação deve aparecer como decisão com nome, objetiv
 resultado. Consulte `docs/decisions/ADR-002-agent-skills.md` e
 `.agents/skills/THIRD_PARTY_NOTICES.md`.
 
+O Workspace Manager copia o conjunto aprovado para `.agents/skills` dentro de
+cada execução. Assim, Developer e QA conseguem carregar as instruções sem obter
+acesso de escrita à raiz do repositório. A cópia é recusada se houver links
+simbólicos no conjunto de origem.
+
 ## Auditabilidade
 
 Cada execução possui uma pasta própria:
