@@ -90,4 +90,41 @@ describe("JsonlEventStore", () => {
       store.listEvents("../../outside")
     ).rejects.toThrow("Invalid runId");
   });
+
+  it("lista execuções da mais recente para a mais antiga", async () => {
+    const store = await createStore();
+    const older = createState(
+      "run-older",
+      "2026-08-17T10:00:00.000Z"
+    );
+    const newer = createState(
+      "run-newer",
+      "2026-08-17T11:00:00.000Z"
+    );
+
+    await store.saveState(older);
+    await store.saveState(newer);
+
+    await expect(store.listStates()).resolves.toEqual([
+      newer,
+      older
+    ]);
+  });
 });
+
+function createState(runId: string, updatedAt: string): RunState {
+  return {
+    runId,
+    briefing: "Criar uma aplicação de tarefas.",
+    status: "CREATED",
+    currentStoryId: null,
+    attempt: 0,
+    maxAttempts: 3,
+    complexity: "MEDIUM",
+    modelAssignments: [],
+    stories: [],
+    workspacePath: `generated-projects/${runId}`,
+    createdAt: "2026-08-17T09:00:00.000Z",
+    updatedAt
+  };
+}

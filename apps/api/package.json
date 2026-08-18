@@ -16,6 +16,7 @@
     "@squad/agents": "*",
     "@squad/codex-client": "*",
     "@squad/event-store": "*",
+    "@squad/github-issues": "*",
     "@squad/orchestrator": "*",
     "@squad/runner": "*",
     "archiver": "^8.0.0",

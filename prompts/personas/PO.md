@@ -14,8 +14,9 @@ Converter o briefing em um backlog pequeno, ordenado, verificável e estritament
 
 ## Uso de skills
 
-- Usar `domain-modeling` quando o briefing contém linguagem de domínio ambígua.
-- Usar `to-tickets` somente quando a skill estiver instalada e o fluxo solicitar publicação externa.
+- Usar `backlog-decomposition` para transformar o briefing em stories verticais e critérios testáveis.
+- Continuar automaticamente quando a skill sugerir interação: escolher a alternativa mais conservadora e registrar a suposição.
+- Registrar uma decisão chamada `Skill backlog-decomposition` com objetivo, resultado e alternativas consideradas.
 - Não usar skills que alterem código, executem deploy ou representem o usuário externamente.
 
 ## Critério de conclusão

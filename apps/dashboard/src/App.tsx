@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useState,
   type FormEvent
@@ -9,7 +10,9 @@ import {
   getArtifact,
   getDocumentation,
   getRun,
+  getRuns,
   getSquadConfiguration,
+  resumeRun,
   subscribeToEvents
 } from "./api/squad-api";
 import type {
@@ -17,6 +20,7 @@ import type {
   AuditEvent,
   ProjectDocument,
   RunState,
+  RunSummary,
   RunStatus,
   SquadConfiguration
 } from "./api/types";
@@ -27,6 +31,8 @@ const terminalStatuses: RunStatus[] = [
   "BLOCKED",
   "FAILED"
 ];
+
+const selectedRunStorageKey = "squad.selectedRunId";
 
 function App() {
   const [briefing, setBriefing] = useState(
@@ -44,6 +50,30 @@ function App() {
   const [documents, setDocuments] = useState<ProjectDocument[]>([]);
   const [selectedDocumentId, setSelectedDocumentId] = useState("");
   const [artifact, setArtifact] = useState<ArtifactManifest | null>(null);
+  const [runHistory, setRunHistory] = useState<RunSummary[]>([]);
+  const [resuming, setResuming] = useState(false);
+
+  const refreshHistory = useCallback(async () => {
+    try {
+      const result = await getRuns();
+      setRunHistory(result);
+      setRunId((current) => {
+        if (current) {
+          return current;
+        }
+
+        const storedRunId = window.localStorage.getItem(
+          selectedRunStorageKey
+        );
+
+        return result.some((item) => item.runId === storedRunId)
+          ? storedRunId
+          : result[0]?.runId ?? null;
+      });
+    } catch {
+      setRunHistory([]);
+    }
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -66,6 +96,16 @@ function App() {
   }, []);
 
   useEffect(() => {
+    void refreshHistory();
+  }, [refreshHistory]);
+
+  useEffect(() => {
+    if (runId) {
+      window.localStorage.setItem(selectedRunStorageKey, runId);
+    }
+  }, [runId]);
+
+  useEffect(() => {
     getDocumentation()
       .then((result) => {
         setDocuments(result);
@@ -80,13 +120,25 @@ function App() {
     }
 
     let active = true;
+    let refreshTimer: number | undefined;
+    setEvents([]);
+    setArtifact(null);
 
     async function refreshRun() {
       try {
         const state = await getRun(runId!);
 
         if (active) {
-          setRun(state);
+          setRun((previous) => {
+            if (
+              terminalStatuses.includes(state.status) &&
+              previous?.status !== state.status
+            ) {
+              void refreshHistory();
+            }
+
+            return state;
+          });
         }
       } catch {
         if (active) {
@@ -112,7 +164,10 @@ function App() {
           return [...current, event];
         });
 
-        void refreshRun();
+        window.clearTimeout(refreshTimer);
+        refreshTimer = window.setTimeout(() => {
+          void refreshRun();
+        }, 25);
       },
       onCompleted: () => {
         void refreshRun();
@@ -124,9 +179,10 @@ function App() {
 
     return () => {
       active = false;
+      window.clearTimeout(refreshTimer);
       unsubscribe();
     };
-  }, [runId]);
+  }, [refreshHistory, runId]);
 
   useEffect(() => {
     if (!runId || run?.status !== "COMPLETED") {
@@ -170,6 +226,7 @@ function App() {
 
       const result = await createRun(briefing);
       setRunId(result.runId);
+      void refreshHistory();
     } catch (caughtError) {
       setError(
         caughtError instanceof Error
@@ -178,6 +235,27 @@ function App() {
       );
     } finally {
       setStarting(false);
+    }
+  }
+
+  async function handleResume() {
+    if (!runId) {
+      return;
+    }
+
+    try {
+      setResuming(true);
+      setError("");
+      await resumeRun(runId);
+      await refreshHistory();
+    } catch (caughtError) {
+      setError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Erro ao retomar a execução."
+      );
+    } finally {
+      setResuming(false);
     }
   }
 
@@ -199,6 +277,13 @@ function App() {
   const selectedDocument = documents.find(
     (document) => document.id === selectedDocumentId
   );
+  const selectedRunSummary = runHistory.find(
+    (item) => item.runId === runId
+  );
+  const canResume =
+    run !== null &&
+    !terminalStatuses.includes(run.status) &&
+    selectedRunSummary?.active === false;
 
   return (
     <main className="dashboard">
@@ -232,6 +317,35 @@ function App() {
             disabled={starting}
             rows={5}
           />
+
+          <div className="history-controls">
+            <label htmlFor="run-history">
+              Execuções anteriores
+              <select
+                id="run-history"
+                value={runId ?? ""}
+                onChange={(event) => setRunId(event.target.value || null)}
+              >
+                <option value="">Selecione uma execução</option>
+                {runHistory.map((item) => (
+                  <option key={item.runId} value={item.runId}>
+                    {formatHistoryOption(item)}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {canResume && (
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={resuming}
+                onClick={() => void handleResume()}
+              >
+                {resuming ? "Retomando..." : "Retomar execução"}
+              </button>
+            )}
+          </div>
 
           <div className="form-footer">
             <span>
@@ -298,6 +412,16 @@ function App() {
                     <span className="story-id">
                       {story.id}
                     </span>
+                    {story.externalIssue && (
+                      <a
+                        className="story-issue"
+                        href={story.externalIssue.url}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        GitHub #{story.externalIssue.number}
+                      </a>
+                    )}
                     <h3>{story.title}</h3>
                     <p>{story.description}</p>
                   </div>
@@ -658,6 +782,19 @@ function formatBytes(totalBytes: number): string {
   }
 
   return `${(kilobytes / 1024).toFixed(1)} MB`;
+}
+
+function formatHistoryOption(run: RunSummary): string {
+  const date = new Date(run.updatedAt).toLocaleString([], {
+    dateStyle: "short",
+    timeStyle: "short"
+  });
+  const shortBriefing =
+    run.briefing.length > 54
+      ? `${run.briefing.slice(0, 54)}...`
+      : run.briefing;
+
+  return `${run.status} · ${date} · ${shortBriefing}`;
 }
 
 export default App;

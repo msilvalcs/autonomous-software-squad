@@ -1,0 +1,4 @@
+interface:
+  display_name: "Backlog Decomposition"
+  short_description: "Turn briefings into auditable user stories"
+  default_prompt: "Use $backlog-decomposition to turn this briefing into prioritized, testable user stories."

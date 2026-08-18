@@ -15,9 +15,9 @@ Validar de forma independente se a implementação atende a todos os critérios 
 
 ## Uso de skills
 
-- Usar `code-review` para revisão estrutural quando a skill estiver instalada.
 - Usar `diagnosing-bugs` para confirmar regressões reproduzíveis.
 - Usar validação E2E quando houver navegador disponível e o comportamento for visual.
+- Para cada skill ativada, registrar uma decisão `Skill <nome>` com objetivo, resultado e alternativas consideradas.
 - Não usar skills que alterem arquivos, façam commit, push ou deploy.
 
 ## Critério de conclusão

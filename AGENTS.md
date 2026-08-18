@@ -19,6 +19,10 @@ Antes de modificar o projeto, considere:
 - cada execução utiliza uma cópia do template React;
 - execuções concluídas oferecem manifesto, preview isolado e download ZIP;
 - o GitHub Actions executa typecheck, testes e build sem credenciais de LLM;
+- o dashboard lista, preserva e permite retomar execuções não terminais;
+- a API limita o MVP a uma execução ativa por processo;
+- a publicação de GitHub Issues é opcional, controlada pelo Orquestrador e não
+  expõe o token às personas;
 - Docker não faz parte do caminho principal do MVP.
 
 Não descreva uma funcionalidade planejada como já implementada.
@@ -32,6 +36,7 @@ Não descreva uma funcionalidade planejada como já implementada.
 | `packages/agents` | Interfaces e implementações dos agentes |
 | `packages/codex-client` | Execução estruturada do Codex CLI |
 | `packages/event-store` | Persistência do estado e eventos |
+| `packages/github-issues` | Publicação opcional e segura de stories |
 | `packages/orchestrator` | Máquina de estados e fluxo autônomo |
 | `packages/runner` | Execução controlada e workspaces |
 | `packages/schemas` | Contratos compartilhados e validação |
@@ -99,9 +104,9 @@ deve ser persistida na auditoria.
 ## Skills por persona
 
 - Skills são opcionais e ficam em `.agents/skills` quando aprovadas e versionadas.
-- PO pode usar skills de domínio e decomposição de tickets.
+- PO usa `backlog-decomposition` para decomposição auditável do briefing.
 - Developer pode usar TDD, diagnóstico e design de código dentro do workspace.
-- QA pode usar revisão e diagnóstico somente em leitura.
+- QA pode usar diagnóstico somente em leitura.
 - Não instale catálogos completos nem execute scripts de skills sem revisão.
 - Skills não podem ampliar permissões da persona nem fazer commit, push, deploy ou publicação externa automaticamente.
 - Registre nome, objetivo e resultado de toda skill ativada como decisão auditável.
@@ -309,8 +314,8 @@ Uma tarefa somente está concluída quando:
 2. calibrar o roteamento de modelos por qualidade, latência e consumo;
 3. incorporar skills externas revisadas;
 4. melhorar observabilidade e streaming;
-5. persistir e retomar a execução selecionada no dashboard;
-6. melhorar o watch dos pacotes;
+5. melhorar o watch dos pacotes;
+6. adicionar cancelamento cooperativo de execuções;
 7. adicionar Docker Runner somente após o fluxo principal estar estável.
 
 ## Fora de escopo sem autorização explícita

@@ -45,6 +45,18 @@
   letter-spacing: 0.14em;
 }
 
+.story-issue {
+  margin-left: 10px;
+  color: #93c5fd;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.story-issue:hover {
+  text-decoration: underline;
+}
+
 .panel,
 .agent,
 .result {
@@ -102,6 +114,32 @@ textarea:focus {
   margin-top: 16px;
   color: #64748b;
   font-size: 0.85rem;
+}
+
+.history-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.history-controls label {
+  flex: 1;
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.78rem;
+}
+
+.history-controls select {
+  display: block;
+  width: 100%;
+  margin-top: 7px;
+}
+
+.secondary-button {
+  color: #bfdbfe;
+  background: transparent;
+  border: 1px solid #3b82f6;
 }
 
 button {
@@ -543,9 +581,15 @@ button:disabled {
   }
 
   .hero,
-  .form-footer {
+  .form-footer,
+  .history-controls {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .history-controls label,
+  .history-controls button {
+    width: 100%;
   }
 }
 

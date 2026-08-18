@@ -9,6 +9,7 @@ import {
   MockQualityAssuranceAgent
 } from "@squad/agents";
 import { JsonlEventStore } from "@squad/event-store";
+import type { UserStory } from "@squad/schemas";
 
 import {
   DeterministicModelRouter,
@@ -17,7 +18,16 @@ import {
 
 const temporaryDirectories: string[] = [];
 
-async function createOrchestrator() {
+async function createOrchestrator(storyPublisher?: {
+  publish: (
+    runId: string,
+    stories: UserStory[]
+  ) => Promise<Array<{
+    storyId: string;
+    number: number;
+    url: string;
+  }>>;
+}) {
   const directory = await mkdtemp(
     path.join(tmpdir(), "squad-orchestrator-")
   );
@@ -34,9 +44,13 @@ async function createOrchestrator() {
     durationMs: 10,
     timedOut: false
   };
+  const executedCommands: string[] = [];
 
   const runner = {
-    run: async () => successfulExecution
+    run: async (input: { command: string }) => {
+      executedCommands.push(input.command);
+      return successfulExecution;
+    }
   };
 
   const workspaceManager = {
@@ -50,12 +64,14 @@ async function createOrchestrator() {
     qa: new MockQualityAssuranceAgent(),
     eventStore,
     runner,
-    workspaceManager
+    workspaceManager,
+    storyPublisher
   });
 
   return {
     orchestrator,
-    eventStore
+    eventStore,
+    executedCommands
   };
 }
 
@@ -138,6 +154,134 @@ describe("Orchestrator", () => {
         briefing: "   "
       })
     ).rejects.toThrow("Briefing cannot be empty");
+  });
+
+  it("retoma uma execução persistida sem repetir stories aprovadas", async () => {
+    const { orchestrator, eventStore, executedCommands } =
+      await createOrchestrator();
+    const state = await orchestrator.createRun({
+      briefing: "Criar uma aplicação para controle de tarefas.",
+      maxAttempts: 3
+    });
+    const backlog = await new MockProductOwnerAgent().createBacklog(
+      state.briefing
+    );
+    state.stories = backlog.stories;
+    state.stories[0]!.status = "PASSED";
+    state.stories[1]!.status = "FAILED";
+    state.currentStoryId = state.stories[1]!.id;
+    state.attempt = 1;
+    state.status = "DEVELOPING";
+    await eventStore.saveState(state);
+
+    const rejectedStory = state.stories[1]!;
+    await eventStore.appendEvent({
+      eventId: "evt-rejected",
+      runId: state.runId,
+      timestamp: new Date().toISOString(),
+      actor: "QA",
+      action: "STORY_REJECTED",
+      message: `${rejectedStory.id} foi rejeitada.`,
+      storyId: rejectedStory.id,
+      metadata: {
+        summary: "Falta evidência.",
+        criteria: rejectedStory.acceptanceCriteria.map((criterion) => ({
+          criterion,
+          passed: false,
+          evidence: "Critério ainda não coberto."
+        })),
+        requestedChanges: ["Adicionar a cobertura ausente."],
+        decisions: [{
+          decision: "Reprovar a story.",
+          rationale: "Falta evidência objetiva.",
+          alternativesConsidered: []
+        }]
+      }
+    });
+
+    const finalState = await orchestrator.resume(state);
+    const events = await eventStore.listEvents(state.runId);
+
+    expect(finalState.status).toBe("COMPLETED");
+    expect(
+      events.some((event) => event.action === "RUN_RESUMED")
+    ).toBe(true);
+    expect(
+      events.some((event) => event.action === "STORY_RESUMED")
+    ).toBe(true);
+    expect(
+      events.some(
+        (event) =>
+          event.action === "IMPLEMENTATION_COMPLETED" &&
+          event.message.includes("corrigida")
+      )
+    ).toBe(true);
+    expect(executedCommands[0]).toBe("npm install");
+  });
+
+  it("persiste as issues publicadas e registra a integração", async () => {
+    const storyPublisher = {
+      publish: async (_runId: string, stories: UserStory[]) =>
+        stories.map((story, index) => ({
+          storyId: story.id,
+          number: index + 10,
+          url: `https://github.com/acme/squad/issues/${index + 10}`
+        }))
+    };
+    const { orchestrator, eventStore } =
+      await createOrchestrator(storyPublisher);
+    const state = await orchestrator.createRun({
+      briefing: "Criar uma aplicação para controle de tarefas."
+    });
+
+    const finalState = await orchestrator.execute(state);
+    const events = await eventStore.listEvents(state.runId);
+
+    expect(finalState.stories[0]?.externalIssue).toEqual({
+      provider: "github",
+      number: 10,
+      url: "https://github.com/acme/squad/issues/10"
+    });
+    expect(
+      events.some((event) => event.action === "STORIES_PUBLISHED")
+    ).toBe(true);
+  });
+
+  it("preserva issues publicadas quando uma story posterior falha", async () => {
+    const storyPublisher = {
+      publish: async (_runId: string, stories: UserStory[]) => {
+        const story = stories[0]!;
+
+        if (story.id === "US-002") {
+          throw new Error("GitHub unavailable");
+        }
+
+        return [{
+          storyId: story.id,
+          number: 21,
+          url: "https://github.com/acme/squad/issues/21"
+        }];
+      }
+    };
+    const { orchestrator, eventStore } =
+      await createOrchestrator(storyPublisher);
+    const state = await orchestrator.createRun({
+      briefing: "Criar uma aplicação para controle de tarefas."
+    });
+
+    const finalState = await orchestrator.execute(state);
+    const events = await eventStore.listEvents(state.runId);
+
+    expect(finalState.status).toBe("COMPLETED");
+    expect(finalState.stories[0]?.externalIssue?.number).toBe(21);
+    expect(finalState.stories[1]?.externalIssue).toBeUndefined();
+    expect(
+      events.some(
+        (event) =>
+          event.action === "STORY_PUBLICATION_FAILED" &&
+          event.storyId === "US-002"
+      )
+    ).toBe(true);
   });
 });
 

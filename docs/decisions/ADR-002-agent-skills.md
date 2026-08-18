@@ -2,7 +2,7 @@
 
 ## Status
 
-Aceito para adoção gradual.
+Aceito e aplicado em conjunto mínimo.
 
 ## Contexto
 
@@ -14,11 +14,31 @@ Não instalar o catálogo completo. Avaliar, fixar uma revisão e versionar some
 
 Fluxo permitido:
 
-1. PO pode usar `domain-modeling` e `to-tickets` para estruturar domínio e stories.
+1. PO usa `backlog-decomposition`, uma skill local sem scripts, para estruturar stories sem alterar código.
 2. Developer pode usar `tdd`, `diagnosing-bugs` e `codebase-design` dentro do workspace isolado.
-3. QA pode usar `code-review` e `diagnosing-bugs` em modo somente leitura.
+3. QA pode usar `diagnosing-bugs` em modo somente leitura.
 4. Skills que fazem commit, push, publicação em issue tracker, deploy ou escrita fora do workspace exigem autorização separada e não entram no fluxo autônomo padrão.
 5. Toda ativação de skill deve gerar decisão auditável com nome, objetivo e resultado.
+
+As três skills externas foram fixadas no commit
+`9c9f36ccd3995266cd675468af71639c8dde1ec5` de `mattpocock/skills`. A licença
+e a atribuição estão em `.agents/skills/THIRD_PARTY_NOTICES.md`.
+
+## Avaliação realizada
+
+| Skill | Decisão | Motivo |
+|---|---|---|
+| `tdd` | Aprovada para Developer | Orienta testes por comportamento e não amplia permissões. |
+| `diagnosing-bugs` | Aprovada para Developer e QA | Prioriza reprodução e evidência; o QA permanece somente leitura. |
+| `codebase-design` | Aprovada para Developer | Ajuda a avaliar coesão antes de abstrações; `DESIGN-IT-TWICE` fica vedado por exigir delegação paralela. |
+| `domain-modeling` | Rejeitada no fluxo automático | Pressupõe criação de documentos de contexto e ADRs, incompatível com o PO somente leitura. |
+| `to-tickets` | Rejeitada no fluxo automático | Pressupõe configuração interativa e publicação em tracker. |
+| `code-review` | Rejeitada no fluxo automático | Pressupõe agentes paralelos e um tracker externo. |
+
+Para preencher a lacuna do PO, o projeto mantém `backlog-decomposition`, skill
+curta e sem recursos executáveis. Instruções interativas presentes nas skills
+externas não interrompem uma execução: a persona escolhe a opção conservadora,
+respeita seu sandbox e registra a decisão.
 
 ## Critérios para incorporar uma skill
 

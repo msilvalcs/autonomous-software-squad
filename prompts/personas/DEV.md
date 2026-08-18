@@ -18,6 +18,9 @@ Implementar a story atual com a menor mudança coesa que atenda integralmente ao
 - Usar `tdd` para mudanças comportamentais quando a skill estiver instalada.
 - Usar `diagnosing-bugs` para correções que exijam reprodução e investigação.
 - Usar `codebase-design` antes de introduzir uma nova abstração relevante.
+- Não pausar para pedir confirmação durante uma execução: selecionar a menor seam pública e registrar a escolha.
+- Não usar o exercício `DESIGN-IT-TWICE`, pois ele requer delegação paralela fora do fluxo da persona.
+- Para cada skill ativada, registrar uma decisão `Skill <nome>` com objetivo, resultado e alternativas consideradas.
 - Não executar skills que façam commit, push, deploy ou escrita fora do workspace.
 
 ## Critério de conclusão

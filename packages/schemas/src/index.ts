@@ -55,7 +55,12 @@ export const UserStorySchema = z.object({
   description: z.string().min(1),
   priority: z.number().int().positive(),
   acceptanceCriteria: z.array(z.string().min(1)).min(1),
-  status: StoryStatusSchema
+  status: StoryStatusSchema,
+  externalIssue: z.object({
+    provider: z.literal("github"),
+    number: z.number().int().positive(),
+    url: z.url()
+  }).optional()
 });
 
 export type UserStory = z.infer<typeof UserStorySchema>;

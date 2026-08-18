@@ -20,6 +20,8 @@ O projeto foi concebido para a **Trilha B — Squad Autônomo de Agentes** do Ha
 | Workspace isolado | Funcional | Uma cópia do template por execução |
 | Entrega do artefato | Funcional | Preview isolado, resumo e download ZIP |
 | Integração contínua | Funcional | Typecheck, testes e build no GitHub Actions |
+| Histórico e retomada | Funcional | Seleção persistida e continuação auditável |
+| GitHub Issues | Opcional | Stories publicadas com checklist e rastreabilidade |
 | Docker Runner | Planejado | Diferencial posterior ao MVP |
 
 > PO, Developer e QA podem operar com Codex. O Developer altera somente a cópia isolada da aplicação, enquanto o QA inspeciona o resultado em modo somente leitura. Os mocks permanecem intencionalmente disponíveis como fallback de demonstração.
@@ -129,6 +131,7 @@ autonomous-software-squad/
 │   ├── agents/              # Contratos e agentes mock/Codex
 │   ├── codex-client/        # Adapter para codex exec
 │   ├── event-store/         # Estado JSON e eventos JSONL
+│   ├── github-issues/       # Publisher opcional de stories
 │   ├── orchestrator/        # Máquina de estados
 │   ├── runner/              # LocalRunner e WorkspaceManager
 │   └── schemas/             # Contratos compartilhados com Zod
@@ -203,6 +206,19 @@ GENERATED_PROJECTS_PATH=./generated-projects
 PORT=3000
 ```
 
+Para publicar o backlog como GitHub Issues, configure um token com a permissão
+mínima necessária no repositório:
+
+```env
+GITHUB_ISSUES_ENABLED=true
+GITHUB_REPOSITORY=owner/repository
+GITHUB_TOKEN=
+```
+
+O recurso fica desligado por padrão. O token é usado somente pelo publisher da
+API e nunca é incluído nos prompts dos agentes ou na auditoria. Consulte
+`docs/decisions/ADR-006-github-issues.md`.
+
 Não versione `.env`, credenciais ou arquivos internos de autenticação do Codex.
 
 `MODEL_ROUTING_CONFIG` aceita JSON para sobrescrever uma rota específica. Um
@@ -239,10 +255,15 @@ curl -s http://localhost:3000/health
 ## Exemplo de briefing
 
 ```text
-Crie uma aplicação web para controle de equipamentos industriais. O usuário
-deve cadastrar equipamentos com nome, código patrimonial e estado operacional,
-listar os registros e filtrar por estado. O código patrimonial deve ser único.
+Crie uma aplicação web para gestão de não conformidades em uma linha de
+produção. Cadastre ocorrências com código único, equipamento, severidade,
+responsável e descrição. Permita busca, filtros, resolução com ação corretiva,
+indicadores operacionais e persistência local. A interface deve ser acessível,
+responsiva e coberta por testes automatizados.
 ```
+
+O briefing completo e a evidência de uma execução Codex real estão em
+`docs/demo/industrial-validation.md`.
 
 ## Endpoints
 
@@ -251,7 +272,9 @@ listar os registros e filtrar por estado. O código patrimonial deve ser único.
 | `GET` | `/health` | Saúde da API e provedor configurado |
 | `GET` | `/documentation` | Documentos permitidos para leitura no dashboard |
 | `POST` | `/runs` | Criar e iniciar uma execução |
+| `GET` | `/runs` | Listar o histórico de execuções |
 | `GET` | `/runs/:runId` | Consultar o estado atual |
+| `POST` | `/runs/:runId/resume` | Retomar uma execução não terminal |
 | `GET` | `/runs/:runId/events` | Consultar o histórico completo |
 | `GET` | `/runs/:runId/stream` | Acompanhar eventos por SSE |
 | `GET` | `/runs/:runId/artifact` | Consultar manifesto e resumo da entrega |
@@ -265,7 +288,12 @@ efetivamente selecionados pelo Orquestrador.
 O dashboard também oferece filtros por ator e texto na timeline. A seção de
 documentação permite consultar regras do projeto, ADRs e personas sem conceder
 acesso arbitrário ao filesystem: a API publica somente uma allowlist fixa de
-arquivos versionados.
+arquivos versionados, incluindo as skills aprovadas e suas licenças.
+
+O histórico mantém a seleção após recarregar a página. Execuções interrompidas
+podem ser retomadas sem repetir stories aprovadas, e os eventos
+`RUN_RESUMED` e `STORY_RESUMED` registram a recuperação. A API aceita somente
+uma execução ativa por processo no MVP.
 
 Quando a execução termina com sucesso, a seção de entrega mostra stories
 aprovadas, decisões, eventos, duração e tamanho do pacote. O preview usa apenas
@@ -274,16 +302,18 @@ links simbólicos são validados antes de qualquer arquivo ser publicado.
 
 ## Skills
 
-Skills externas são válidas, mas devem ser adotadas de forma gradual. O fluxo
-prevê skills específicas por persona, sem instalar catálogos completos:
+O conjunto mínimo revisado está versionado em `.agents/skills`:
 
-- PO: modelagem de domínio e decomposição de tickets;
-- Developer: TDD, diagnóstico e design de código;
-- QA: code review e diagnóstico em modo somente leitura.
+- PO: `backlog-decomposition`, mantida pelo projeto;
+- Developer: `tdd`, `diagnosing-bugs` e `codebase-design`;
+- QA: `diagnosing-bugs` em modo somente leitura.
 
-Cada skill precisa de revisão de licença, `SKILL.md`, scripts, permissões e
-gatilhos antes de ser versionada em `.agents/skills`. Consulte
-`docs/decisions/ADR-002-agent-skills.md`.
+As skills externas vieram de `mattpocock/skills`, tiveram licença, instruções,
+scripts e permissões revisados e estão fixadas em uma revisão registrada. Skills
+interativas ou que exigem publicação e agentes paralelos foram rejeitadas para o
+fluxo automático. Toda ativação deve aparecer como decisão com nome, objetivo e
+resultado. Consulte `docs/decisions/ADR-002-agent-skills.md` e
+`.agents/skills/THIRD_PARTY_NOTICES.md`.
 
 ## Auditabilidade
 
@@ -365,7 +395,7 @@ Os testes cobrem atualmente:
 - conclusão e limite de tentativas;
 - allowlist do Runner;
 - proteção do diretório de execução;
-- preparação dos workspaces.
+- preparação dos workspaces;
 - proteção de caminhos, links simbólicos e arquivos do artefato.
 
 ## Limitações conhecidas
@@ -376,18 +406,18 @@ Os testes cobrem atualmente:
 - o Local Runner oferece controle, mas não isolamento forte como um container;
 - pacotes internos precisam ser recompilados quando seus arquivos `src` mudam;
 - JSONL é adequado ao MVP, mas não substitui um banco transacional em escala;
-- interrupção e retomada automática de uma execução ainda não foram implementadas.
+- retomada automática no startup ainda não foi implementada;
+- cancelamento imediato de um agente em processamento ainda não foi implementado;
+- o lock de execução ativa é local ao processo da API.
 
 ## Roadmap
 
 1. transmitir logs do Codex para a timeline;
 2. calibrar o roteamento com métricas de qualidade, latência e consumo;
-3. revisar e incorporar um conjunto mínimo de skills em `.agents/skills`;
+3. medir o efeito das skills em qualidade e consumo de contexto;
 4. melhorar o modo watch dos pacotes internos;
-5. adicionar retomada de execuções interrompidas;
-6. criar integração opcional para publicar stories como GitHub Issues;
-7. criar `DockerRunner` opcional;
-8. adicionar autenticação e persistência em banco, caso o produto evolua.
+5. criar `DockerRunner` opcional;
+6. adicionar autenticação e persistência em banco, caso o produto evolua.
 
 ## Demonstração sugerida
 

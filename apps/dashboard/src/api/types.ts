@@ -22,6 +22,11 @@ export interface UserStory {
   priority: number;
   acceptanceCriteria: string[];
   status: StoryStatus;
+  externalIssue?: {
+    provider: "github";
+    number: number;
+    url: string;
+  };
 }
 
 export interface RunState {
@@ -73,6 +78,7 @@ export interface CreateRunResponse {
 export interface SquadConfiguration {
   llmProvider: string;
   llmModel: string | null;
+  githubIssuesEnabled: boolean;
 }
 
 export interface ProjectDocument {
@@ -98,4 +104,17 @@ export interface ArtifactManifest {
     decisions: number;
     durationMs: number;
   };
+}
+
+export interface RunSummary {
+  runId: string;
+  briefing: string;
+  status: RunStatus;
+  complexity: "LOW" | "MEDIUM" | "HIGH";
+  storyCount: number;
+  approvedStoryCount: number;
+  currentStoryId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  active: boolean;
 }

@@ -17,6 +17,7 @@ import {
 } from "@squad/agents";
 
 import { JsonlEventStore } from "@squad/event-store";
+import { GitHubIssuesPublisher } from "@squad/github-issues";
 import {
   DeterministicModelRouter,
   Orchestrator,
@@ -28,6 +29,7 @@ import {
 } from "@squad/runner";
 
 import { CodexClient } from "@squad/codex-client";
+import type { RunState } from "@squad/schemas";
 
 import {
   createArtifactArchive,
@@ -81,6 +83,7 @@ const routingPolicy = new DeterministicModelRouter(
   routingOverrides,
   llmProvider
 );
+const githubIssuesPublisher = createGitHubIssuesPublisher();
 
 const [poPersona, developerPersona, qaPersona] = await Promise.all([
   loadPersona("PO.md"),
@@ -123,12 +126,15 @@ const orchestrator = new Orchestrator({
   eventStore,
   runner,
   workspaceManager,
-  routingPolicy
+  routingPolicy,
+  storyPublisher: githubIssuesPublisher
 });
 
 const app = Fastify({
   logger: true
 });
+
+const activeExecutions = new Map<string, Promise<void>>();
 
 const documentationFiles = [
   {
@@ -181,6 +187,39 @@ const documentationFiles = [
       "ADR-004-continuous-integration.md"
     )
   },
+  {
+    id: "run-history-and-recovery",
+    title: "ADR-005: Histórico e retomada",
+    category: "Arquitetura",
+    path: path.join(
+      repositoryRoot,
+      "docs",
+      "decisions",
+      "ADR-005-run-history-and-recovery.md"
+    )
+  },
+  {
+    id: "github-issues",
+    title: "ADR-006: GitHub Issues",
+    category: "Integrações",
+    path: path.join(
+      repositoryRoot,
+      "docs",
+      "decisions",
+      "ADR-006-github-issues.md"
+    )
+  },
+  {
+    id: "industrial-validation",
+    title: "Validação industrial",
+    category: "Demonstração",
+    path: path.join(
+      repositoryRoot,
+      "docs",
+      "demo",
+      "industrial-validation.md"
+    )
+  },
   ...["PO", "DEV", "QA"].map((persona) => ({
     id: `persona-${persona.toLowerCase()}`,
     title: `Persona: ${persona}`,
@@ -191,7 +230,35 @@ const documentationFiles = [
       "personas",
       `${persona}.md`
     )
-  }))
+  })),
+  ...([
+    ["backlog-decomposition", "Backlog decomposition"],
+    ["tdd", "Test-driven development"],
+    ["diagnosing-bugs", "Diagnóstico de bugs"],
+    ["codebase-design", "Design de código"]
+  ] as const).map(([skillId, title]) => ({
+    id: `skill-${skillId}`,
+    title: `Skill: ${title}`,
+    category: "Skills",
+    path: path.join(
+      repositoryRoot,
+      ".agents",
+      "skills",
+      skillId,
+      "SKILL.md"
+    )
+  })),
+  {
+    id: "skills-third-party-notices",
+    title: "Licenças das skills",
+    category: "Skills",
+    path: path.join(
+      repositoryRoot,
+      ".agents",
+      "skills",
+      "THIRD_PARTY_NOTICES.md"
+    )
+  }
 ];
 
 await app.register(cors, {
@@ -202,6 +269,7 @@ app.get("/health", async () => ({
   status: "ok",
   llmProvider,
   llmModel: process.env.LLM_MODEL || null,
+  githubIssuesEnabled: githubIssuesPublisher !== undefined,
   timestamp: new Date().toISOString()
 }));
 
@@ -222,6 +290,15 @@ app.post<{
     maxAttempts?: number;
   };
 }>("/runs", async (request, reply) => {
+  const activeRunId = activeExecutions.keys().next().value;
+
+  if (activeRunId) {
+    return reply.status(409).send({
+      error: "Another run is already active",
+      activeRunId
+    });
+  }
+
   const briefing = request.body?.briefing;
 
   if (typeof briefing !== "string" || briefing.trim() === "") {
@@ -235,12 +312,39 @@ app.post<{
     maxAttempts: request.body.maxAttempts
   });
 
-  void orchestrator.execute(state);
+  startExecution(state, false);
 
   return reply.status(202).send({
     runId: state.runId,
     status: state.status
   });
+});
+
+app.get<{
+  Querystring: {
+    limit?: string;
+  };
+}>("/runs", async (request) => {
+  const requestedLimit = Number(request.query.limit ?? 20);
+  const limit = Number.isInteger(requestedLimit)
+    ? Math.min(Math.max(requestedLimit, 1), 50)
+    : 20;
+  const states = await eventStore.listStates();
+
+  return states.slice(0, limit).map((state) => ({
+    runId: state.runId,
+    briefing: state.briefing,
+    status: state.status,
+    complexity: state.complexity,
+    storyCount: state.stories.length,
+    approvedStoryCount: state.stories.filter(
+      (story) => story.status === "PASSED"
+    ).length,
+    currentStoryId: state.currentStoryId,
+    createdAt: state.createdAt,
+    updatedAt: state.updatedAt,
+    active: activeExecutions.has(state.runId)
+  }));
 });
 
 app.get<{
@@ -259,6 +363,40 @@ app.get<{
   }
 
   return state;
+});
+
+app.post<{
+  Params: {
+    runId: string;
+  };
+}>("/runs/:runId/resume", async (request, reply) => {
+  const activeRunId = activeExecutions.keys().next().value;
+
+  if (activeRunId) {
+    return reply.status(409).send({
+      error: "Another run is already active",
+      activeRunId
+    });
+  }
+
+  const state = await eventStore.loadState(request.params.runId);
+
+  if (!state) {
+    return reply.status(404).send({ error: "Run not found" });
+  }
+
+  if (["COMPLETED", "BLOCKED", "FAILED"].includes(state.status)) {
+    return reply.status(409).send({
+      error: "Run cannot be resumed from its current status"
+    });
+  }
+
+  startExecution(state, true);
+
+  return reply.status(202).send({
+    runId: state.runId,
+    status: state.status
+  });
 });
 
 app.get<{
@@ -560,6 +698,48 @@ function parseRoutingOverrides(
   }
 
   return parsed as RoutingOverrides;
+}
+
+function createGitHubIssuesPublisher():
+  | GitHubIssuesPublisher
+  | undefined {
+  if (process.env.GITHUB_ISSUES_ENABLED !== "true") {
+    return undefined;
+  }
+
+  const token = process.env.GITHUB_TOKEN;
+  const repository = process.env.GITHUB_REPOSITORY;
+
+  if (!token || !repository) {
+    throw new Error(
+      "GITHUB_TOKEN and GITHUB_REPOSITORY are required when GitHub Issues are enabled"
+    );
+  }
+
+  return new GitHubIssuesPublisher({
+    token,
+    repository
+  });
+}
+
+function startExecution(
+  state: RunState,
+  resume: boolean
+): void {
+  const execution = (
+    resume
+      ? orchestrator.resume(state)
+      : orchestrator.execute(state)
+  )
+    .then(() => undefined)
+    .catch((error: unknown) => {
+      app.log.error(error);
+    })
+    .finally(() => {
+      activeExecutions.delete(state.runId);
+    });
+
+  activeExecutions.set(state.runId, execution);
 }
 
 async function getCompletedArtifact(

@@ -1,6 +1,7 @@
 import {
   appendFile,
   mkdir,
+  readdir,
   readFile,
   writeFile
 } from "node:fs/promises";
@@ -84,6 +85,37 @@ export class JsonlEventStore {
 
       throw error;
     }
+  }
+
+  async listStates(): Promise<RunState[]> {
+    let entries;
+
+    try {
+      entries = await readdir(this.baseDirectory, {
+        withFileTypes: true
+      });
+    } catch (error) {
+      if (isFileNotFoundError(error)) {
+        return [];
+      }
+
+      throw error;
+    }
+
+    const states = await Promise.all(
+      entries
+        .filter(
+          (entry) =>
+            entry.isDirectory() && /^run-[a-zA-Z0-9_-]+$/.test(entry.name)
+        )
+        .map((entry) => this.loadState(entry.name))
+    );
+
+    return states
+      .filter((state): state is RunState => state !== null)
+      .sort((left, right) =>
+        right.updatedAt.localeCompare(left.updatedAt)
+      );
   }
 
   private getRunDirectory(runId: string): string {

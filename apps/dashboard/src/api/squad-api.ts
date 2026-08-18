@@ -3,6 +3,7 @@ import type {
   AuditEvent,
   CreateRunResponse,
   ProjectDocument,
+  RunSummary,
   RunState,
   SquadConfiguration
 } from "./types";
@@ -44,7 +45,42 @@ export async function createRun(
   });
 
   if (!response.ok) {
-    throw new Error("Não foi possível iniciar o squad.");
+    const payload = await readErrorPayload(response);
+    throw new Error(
+      payload.activeRunId
+        ? `A execução ${payload.activeRunId} ainda está ativa.`
+        : "Não foi possível iniciar o squad."
+    );
+  }
+
+  return response.json() as Promise<CreateRunResponse>;
+}
+
+export async function getRuns(): Promise<RunSummary[]> {
+  const response = await fetch(`${API_BASE_URL}/runs?limit=30`);
+
+  if (!response.ok) {
+    throw new Error("Não foi possível consultar o histórico.");
+  }
+
+  return response.json() as Promise<RunSummary[]>;
+}
+
+export async function resumeRun(
+  runId: string
+): Promise<CreateRunResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/runs/${runId}/resume`,
+    { method: "POST" }
+  );
+
+  if (!response.ok) {
+    const payload = await readErrorPayload(response);
+    throw new Error(
+      payload.activeRunId
+        ? `A execução ${payload.activeRunId} ainda está ativa.`
+        : "Não foi possível retomar a execução."
+    );
   }
 
   return response.json() as Promise<CreateRunResponse>;
@@ -111,4 +147,14 @@ export function subscribeToEvents(
   };
 
   return () => source.close();
+}
+
+async function readErrorPayload(
+  response: Response
+): Promise<{ activeRunId?: string }> {
+  try {
+    return await response.json() as { activeRunId?: string };
+  } catch {
+    return {};
+  }
 }
