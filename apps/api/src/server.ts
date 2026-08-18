@@ -232,6 +232,17 @@ const documentationFiles = [
     )
   },
   {
+    id: "persona-execution-policies",
+    title: "ADR-008: Políticas por persona",
+    category: "Segurança",
+    path: path.join(
+      repositoryRoot,
+      "docs",
+      "decisions",
+      "ADR-008-persona-execution-policies.md"
+    )
+  },
+  {
     id: "industrial-validation",
     title: "Validação industrial",
     category: "Demonstração",

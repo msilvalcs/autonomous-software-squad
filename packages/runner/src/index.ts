@@ -6,6 +6,7 @@ import {
   readdir,
   rm
 } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 
 export type AllowedCommand =
@@ -37,8 +38,25 @@ export interface ExecutionEnvironment {
   image?: string;
 }
 
+export interface RunnerExecutionPolicy {
+  runtime: "local-process" | "docker-container";
+  workspaceAccess: "run-write";
+  networkAccess: "host" | "install-only";
+  credentialAccess: "none";
+  allowedCommands: AllowedCommand[];
+  privileged: false;
+  dockerSocket: false;
+  limits: {
+    timeoutMs: number;
+    cpu: number | null;
+    memory: string | null;
+    pids: number | null;
+  };
+}
+
 export interface ExecutionRunner {
   readonly backend: ExecutionBackend;
+  readonly policy: RunnerExecutionPolicy;
   prepare(workspace: string): Promise<ExecutionEnvironment>;
   run(request: ExecutionRequest): Promise<ExecutionResult>;
   dispose(workspace: string): Promise<void>;
@@ -51,8 +69,61 @@ const commandArguments: Record<AllowedCommand, string[]> = {
   "npm run typecheck": ["run", "typecheck"]
 };
 
+const allowedCommands = Object.keys(
+  commandArguments
+) as AllowedCommand[];
+
+const llmCredentialVariables = [
+  "ANTHROPIC_API_KEY",
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SECRET_ACCESS_KEY",
+  "AWS_SESSION_TOKEN",
+  "AZURE_OPENAI_API_KEY",
+  "CODEX_ACCESS_TOKEN",
+  "CODEX_HOME",
+  "GEMINI_API_KEY",
+  "GOOGLE_API_KEY",
+  "GROQ_API_KEY",
+  "MISTRAL_API_KEY",
+  "OPENAI_API_KEY",
+  "OPENROUTER_API_KEY"
+] as const;
+
+export function createRunnerEnvironment(
+  source: NodeJS.ProcessEnv,
+  homeDirectory: string
+): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {
+    ...source,
+    CI: "true",
+    HOME: homeDirectory,
+    XDG_CONFIG_HOME: homeDirectory
+  };
+
+  for (const variable of llmCredentialVariables) {
+    delete environment[variable];
+  }
+
+  return environment;
+}
+
 export class LocalRunner implements ExecutionRunner {
   readonly backend = "local" as const;
+  readonly policy: RunnerExecutionPolicy = {
+    runtime: "local-process",
+    workspaceAccess: "run-write",
+    networkAccess: "host",
+    credentialAccess: "none",
+    allowedCommands: [...allowedCommands],
+    privileged: false,
+    dockerSocket: false,
+    limits: {
+      timeoutMs: 180_000,
+      cpu: null,
+      memory: null,
+      pids: null
+    }
+  };
   private readonly baseDirectory: string;
 
   constructor(baseDirectory: string) {
@@ -82,14 +153,17 @@ export class LocalRunner implements ExecutionRunner {
       throw new Error("Command is not allowed");
     }
 
-    if (
-      !Number.isFinite(request.timeoutMs) ||
-      request.timeoutMs <= 0
-    ) {
-      throw new Error("timeoutMs must be greater than zero");
-    }
+    validateTimeout(
+      request.timeoutMs,
+      this.policy.limits.timeoutMs
+    );
 
     const startedAt = Date.now();
+    const runnerHome = path.join(
+      tmpdir(),
+      "autonomous-squad-runner"
+    );
+    await mkdir(runnerHome, { recursive: true });
 
     return new Promise((resolve, reject) => {
       let stdout = "";
@@ -100,10 +174,7 @@ export class LocalRunner implements ExecutionRunner {
       const child = spawn("npm", args, {
         cwd: workspace,
         shell: false,
-        env: {
-          ...process.env,
-          CI: "true"
-        }
+        env: createRunnerEnvironment(process.env, runnerHome)
       });
 
       const timeout = setTimeout(() => {
@@ -189,6 +260,24 @@ export class DockerRunner implements ExecutionRunner {
   private readonly installNetwork: string;
   private readonly environments = new Map<string, string>();
   private readonly networkConnectedWorkspaces = new Set<string>();
+
+  get policy(): RunnerExecutionPolicy {
+    return {
+      runtime: "docker-container",
+      workspaceAccess: "run-write",
+      networkAccess: "install-only",
+      credentialAccess: "none",
+      allowedCommands: [...allowedCommands],
+      privileged: false,
+      dockerSocket: false,
+      limits: {
+        timeoutMs: 180_000,
+        cpu: this.cpuLimit,
+        memory: this.memoryLimit,
+        pids: this.pidsLimit
+      }
+    };
+  }
 
   constructor(options: DockerRunnerOptions) {
     this.baseDirectory = path.resolve(options.baseDirectory);
@@ -286,12 +375,10 @@ export class DockerRunner implements ExecutionRunner {
       throw new Error("Command is not allowed");
     }
 
-    if (
-      !Number.isFinite(request.timeoutMs) ||
-      request.timeoutMs <= 0
-    ) {
-      throw new Error("timeoutMs must be greater than zero");
-    }
+    validateTimeout(
+      request.timeoutMs,
+      this.policy.limits.timeoutMs
+    );
 
     const managedContainer = this.environments.get(workspace);
 
@@ -503,6 +590,21 @@ function resolveAllowedWorkspace(
   }
 
   return resolvedWorkspace;
+}
+
+function validateTimeout(
+  timeoutMs: number,
+  maximumTimeoutMs: number
+): void {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error("timeoutMs must be greater than zero");
+  }
+
+  if (timeoutMs > maximumTimeoutMs) {
+    throw new Error(
+      `timeoutMs cannot exceed ${maximumTimeoutMs}`
+    );
+  }
 }
 
 function createContainerName(workspace: string): string {

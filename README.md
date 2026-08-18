@@ -398,7 +398,7 @@ O DockerRunner monta somente o workspace validado, executa sem root, remove
 capabilities, impede novos privilégios, aplica limites de CPU, memória e PIDs e
 usa root filesystem somente leitura. Build, typecheck e testes ficam sem rede;
 somente `npm install` recebe a rede configurada. O Docker socket nunca é
-montado dentro do container.
+montado dentro do container, e credenciais de LLM não são repassadas ao Runner.
 
 Cada run prepara um único container, reutiliza esse ambiente nas tentativas e
 o remove ao concluir, bloquear ou falhar. Início e descarte são registrados nos
@@ -406,9 +406,14 @@ eventos `EXECUTION_ENVIRONMENT_STARTED` e
 `EXECUTION_ENVIRONMENT_DISPOSED`. Uma retomada cria outro container sobre o
 workspace persistido.
 
-Esta etapa isola os comandos npm. O Codex Developer ainda é executado no host;
-containers por persona e microVMs permanecem como evoluções documentadas em
-`docs/decisions/ADR-007-execution-isolation.md`.
+Cada run também registra `EXECUTION_POLICIES_DECIDED` com a política efetiva de
+PO, Developer, QA e Runner. PO e QA usam sandbox somente leitura, Developer usa
+escrita limitada ao workspace da run e o Runner mantém a allowlist de comandos.
+Consulte `docs/decisions/ADR-008-persona-execution-policies.md`.
+
+Esta etapa isola os comandos npm. O Codex Developer ainda é executado no host.
+Containers por persona e microVMs permanecem como evoluções documentadas nos
+ADRs 007 e 008.
 
 ## Qualidade
 

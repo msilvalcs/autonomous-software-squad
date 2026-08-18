@@ -124,6 +124,57 @@ describe("LocalRunner", () => {
       "timeoutMs must be greater than zero"
     );
   });
+
+  it("rejeita timeout acima da política", async () => {
+    const { baseDirectory, workspace } =
+      await createWorkspace();
+    const runner = new LocalRunner(baseDirectory);
+
+    await expect(
+      runner.run({
+        workspace,
+        command: "npm test",
+        timeoutMs: 180_001
+      })
+    ).rejects.toThrow("timeoutMs cannot exceed 180000");
+  });
+
+  it("não repassa credenciais de LLM ao processo local", async () => {
+    const { baseDirectory, workspace } =
+      await createWorkspace();
+    const originalApiKey = process.env.OPENAI_API_KEY;
+
+    await writeFile(
+      path.join(workspace, "package.json"),
+      JSON.stringify({
+        name: "generated-test-project",
+        version: "1.0.0",
+        scripts: {
+          build: "node -e \"console.log(process.env.OPENAI_API_KEY ?? 'credential-absent')\""
+        }
+      }),
+      "utf8"
+    );
+
+    process.env.OPENAI_API_KEY = "test-secret";
+
+    try {
+      const result = await new LocalRunner(baseDirectory).run({
+        workspace,
+        command: "npm run build",
+        timeoutMs: 10_000
+      });
+
+      expect(result.stdout).toContain("credential-absent");
+      expect(result.stdout).not.toContain("test-secret");
+    } finally {
+      if (originalApiKey === undefined) {
+        delete process.env.OPENAI_API_KEY;
+      } else {
+        process.env.OPENAI_API_KEY = originalApiKey;
+      }
+    }
+  });
 });
 
 describe("DockerRunner", () => {
@@ -225,6 +276,18 @@ describe("DockerRunner", () => {
     expect(args).toContain("none");
     expect(args).toContain("squad-runner:test");
     expect(args.slice(-3)).toEqual(["npm", "run", "build"]);
+    expect(runner.policy).toMatchObject({
+      runtime: "docker-container",
+      networkAccess: "install-only",
+      credentialAccess: "none",
+      privileged: false,
+      dockerSocket: false,
+      limits: {
+        cpu: 1,
+        memory: "1g",
+        pids: 256
+      }
+    });
   });
 
   it("libera rede somente para instalação de dependências", async () => {

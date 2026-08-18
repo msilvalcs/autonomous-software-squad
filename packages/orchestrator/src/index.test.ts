@@ -52,6 +52,26 @@ async function createOrchestrator(
 
   const runner = {
     backend: "local" as const,
+    policy: {
+      runtime: "local-process" as const,
+      workspaceAccess: "run-write" as const,
+      networkAccess: "host" as const,
+      credentialAccess: "none" as const,
+      allowedCommands: [
+        "npm install" as const,
+        "npm test" as const,
+        "npm run build" as const,
+        "npm run typecheck" as const
+      ],
+      privileged: false as const,
+      dockerSocket: false as const,
+      limits: {
+        timeoutMs: 180_000,
+        cpu: null,
+        memory: null,
+        pids: null
+      }
+    },
     prepare: async (workspace: string) => {
       lifecycleCalls.push(`prepare:${workspace}`);
 
@@ -135,6 +155,14 @@ describe("Orchestrator", () => {
     expect(
       events.some(
         (event) => event.action === "MODEL_ROUTING_DECIDED"
+      )
+    ).toBe(true);
+
+    expect(initialState.executionPolicies).toHaveLength(4);
+    expect(
+      events.some(
+        (event) =>
+          event.action === "EXECUTION_POLICIES_DECIDED"
       )
     ).toBe(true);
 

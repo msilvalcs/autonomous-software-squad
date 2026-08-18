@@ -249,6 +249,7 @@ ${briefing}
 `.trim();
 
     const result = await this.client.generate<unknown>({
+      role: "PO",
       prompt,
       outputSchema: backlogOutputSchema,
       workingDirectory: this.workingDirectory,
@@ -355,6 +356,7 @@ ${JSON.stringify(input.previousQaResult, null, 2)}
 `.trim();
 
     const result = await this.client.generate<unknown>({
+      role: "DEV",
       prompt,
       outputSchema: developerOutputSchema,
       workingDirectory: input.workspacePath,
@@ -457,6 +459,7 @@ ${formatEvidence(input.tests)}
 `.trim();
 
     const result = await this.client.generate<unknown>({
+      role: "QA",
       prompt,
       outputSchema: qaOutputSchema,
       workingDirectory: input.workspacePath,

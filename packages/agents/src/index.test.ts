@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { enforcePersonaSandbox } from "@squad/codex-client";
 
 import {
   CodexDeveloperAgent,
@@ -179,9 +180,24 @@ describe("agentes simulados", () => {
     expect(result.storyId).toBe(story.id);
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
+      role: "DEV",
       workingDirectory: workspacePath,
       sandbox: "workspace-write"
     });
+  });
+
+  it("bloqueia escalada de sandbox entre personas", () => {
+    expect(() =>
+      enforcePersonaSandbox("QA", "workspace-write")
+    ).toThrow("QA cannot use sandbox workspace-write");
+
+    expect(() =>
+      enforcePersonaSandbox("PO", "workspace-write")
+    ).toThrow("PO cannot use sandbox workspace-write");
+
+    expect(() =>
+      enforcePersonaSandbox("DEV", "read-only")
+    ).toThrow("DEV cannot use sandbox read-only");
   });
 
   it("o Developer Codex rejeita caminhos fora do workspace", async () => {
@@ -283,6 +299,7 @@ describe("agentes simulados", () => {
     expect(result.storyId).toBe(story.id);
     expect(result.status).toBe("PASS");
     expect(requests[0]).toMatchObject({
+      role: "QA",
       workingDirectory: workspacePath,
       sandbox: "read-only"
     });

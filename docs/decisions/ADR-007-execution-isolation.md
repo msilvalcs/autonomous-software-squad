@@ -59,4 +59,5 @@ tratado como evolução separada.
 - A retomada cria um novo container e reutiliza o workspace persistido, sem
   depender de um processo anterior.
 - Codex Developer, PO e QA permanecem no host nesta etapa. Containers por
-  persona e microVMs continuam como diferenciais posteriores.
+  persona e microVMs continuam como diferenciais posteriores. As permissões e
+  a fronteira de autenticação dessas personas são definidas no ADR-008.

@@ -38,10 +38,35 @@ export interface RunState {
   maxAttempts: number;
   complexity: "LOW" | "MEDIUM" | "HIGH";
   modelAssignments: ModelAssignment[];
+  executionPolicies: ExecutionPolicy[];
   stories: UserStory[];
   workspacePath: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ExecutionPolicy {
+  actor: "PO" | "DEV" | "QA" | "RUNNER";
+  runtime: "host-codex" | "local-process" | "docker-container";
+  workspaceAccess:
+    | "repository-read-only"
+    | "run-read-only"
+    | "run-write";
+  networkAccess:
+    | "provider-only"
+    | "host"
+    | "install-only"
+    | "none";
+  credentialAccess: "host-session" | "runtime-secret" | "none";
+  allowedCommands: string[];
+  privileged: false;
+  dockerSocket: false;
+  limits: {
+    timeoutMs: number;
+    cpu: number | null;
+    memory: string | null;
+    pids: number | null;
+  };
 }
 
 export interface ModelAssignment {

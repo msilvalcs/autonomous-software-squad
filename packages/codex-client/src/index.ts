@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 export interface CodexRequest {
+  role: "PO" | "DEV" | "QA";
   prompt: string;
   outputSchema: Record<string, unknown>;
   workingDirectory: string;
@@ -34,6 +35,11 @@ export class CodexClient {
       throw new Error("Codex prompt cannot be empty");
     }
 
+    const sandbox = enforcePersonaSandbox(
+      request.role,
+      request.sandbox
+    );
+
     const temporaryDirectory = await mkdtemp(
       path.join(tmpdir(), "squad-codex-")
     );
@@ -57,7 +63,7 @@ export class CodexClient {
     const args = [
       "exec",
       "--sandbox",
-      request.sandbox ?? "read-only",
+      sandbox,
       "--output-schema",
       schemaPath,
       "--output-last-message",
@@ -125,6 +131,29 @@ export class CodexClient {
       });
     }
   }
+}
+
+const personaSandboxes = {
+  PO: "read-only",
+  DEV: "workspace-write",
+  QA: "read-only"
+} as const;
+
+export function enforcePersonaSandbox(
+  role: CodexRequest["role"],
+  requestedSandbox?: CodexRequest["sandbox"]
+): NonNullable<CodexRequest["sandbox"]> {
+  const requiredSandbox = personaSandboxes[role];
+  const selectedSandbox = requestedSandbox ?? requiredSandbox;
+
+  if (selectedSandbox !== requiredSandbox) {
+    throw new Error(
+      `${role} cannot use sandbox ${selectedSandbox}; ` +
+      `required sandbox is ${requiredSandbox}`
+    );
+  }
+
+  return selectedSandbox;
 }
 
 interface RunCodexInput {

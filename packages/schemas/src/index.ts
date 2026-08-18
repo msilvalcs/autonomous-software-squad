@@ -11,6 +11,49 @@ export type TaskComplexity = z.infer<typeof TaskComplexitySchema>;
 export const AgentRoleSchema = z.enum(["PO", "DEV", "QA"]);
 export type AgentRole = z.infer<typeof AgentRoleSchema>;
 
+export const ExecutionPolicyActorSchema = z.enum([
+  "PO",
+  "DEV",
+  "QA",
+  "RUNNER"
+]);
+
+export const ExecutionPolicySchema = z.object({
+  actor: ExecutionPolicyActorSchema,
+  runtime: z.enum([
+    "host-codex",
+    "local-process",
+    "docker-container"
+  ]),
+  workspaceAccess: z.enum([
+    "repository-read-only",
+    "run-read-only",
+    "run-write"
+  ]),
+  networkAccess: z.enum([
+    "provider-only",
+    "host",
+    "install-only",
+    "none"
+  ]),
+  credentialAccess: z.enum([
+    "host-session",
+    "runtime-secret",
+    "none"
+  ]),
+  allowedCommands: z.array(z.string().min(1)),
+  privileged: z.literal(false),
+  dockerSocket: z.literal(false),
+  limits: z.object({
+    timeoutMs: z.number().int().positive(),
+    cpu: z.number().positive().nullable(),
+    memory: z.string().min(1).nullable(),
+    pids: z.number().int().positive().nullable()
+  })
+});
+
+export type ExecutionPolicy = z.infer<typeof ExecutionPolicySchema>;
+
 export const ReasoningEffortSchema = z.enum([
   "low",
   "medium",
@@ -119,6 +162,7 @@ export const RunStateSchema = z.object({
   maxAttempts: z.number().int().positive(),
   complexity: TaskComplexitySchema.default("MEDIUM"),
   modelAssignments: z.array(ModelAssignmentSchema).default([]),
+  executionPolicies: z.array(ExecutionPolicySchema).default([]),
   stories: z.array(UserStorySchema),
   workspacePath: z.string().min(1),
   createdAt: z.string().datetime(),

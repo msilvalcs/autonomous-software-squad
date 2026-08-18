@@ -9,6 +9,7 @@ import type { JsonlEventStore } from "@squad/event-store";
 import type {
   AuditEvent,
   AgentRole,
+  ExecutionPolicy,
   ModelAssignment,
   QaResult,
   ReasoningEffort,
@@ -178,6 +179,72 @@ function defaultRoute(
   };
 }
 
+function executionPoliciesFor(
+  runner: ExecutionRunner
+): ExecutionPolicy[] {
+  return [
+    {
+      actor: "PO",
+      runtime: "host-codex",
+      workspaceAccess: "repository-read-only",
+      networkAccess: "provider-only",
+      credentialAccess: "host-session",
+      allowedCommands: [],
+      privileged: false,
+      dockerSocket: false,
+      limits: {
+        timeoutMs: 300_000,
+        cpu: null,
+        memory: null,
+        pids: null
+      }
+    },
+    {
+      actor: "DEV",
+      runtime: "host-codex",
+      workspaceAccess: "run-write",
+      networkAccess: "provider-only",
+      credentialAccess: "host-session",
+      allowedCommands: [],
+      privileged: false,
+      dockerSocket: false,
+      limits: {
+        timeoutMs: 600_000,
+        cpu: null,
+        memory: null,
+        pids: null
+      }
+    },
+    {
+      actor: "QA",
+      runtime: "host-codex",
+      workspaceAccess: "run-read-only",
+      networkAccess: "provider-only",
+      credentialAccess: "host-session",
+      allowedCommands: [],
+      privileged: false,
+      dockerSocket: false,
+      limits: {
+        timeoutMs: 300_000,
+        cpu: null,
+        memory: null,
+        pids: null
+      }
+    },
+    {
+      actor: "RUNNER",
+      runtime: runner.policy.runtime,
+      workspaceAccess: runner.policy.workspaceAccess,
+      networkAccess: runner.policy.networkAccess,
+      credentialAccess: runner.policy.credentialAccess,
+      allowedCommands: runner.policy.allowedCommands,
+      privileged: runner.policy.privileged,
+      dockerSocket: runner.policy.dockerSocket,
+      limits: runner.policy.limits
+    }
+  ];
+}
+
 export interface CreateRunInput {
   briefing: string;
   maxAttempts?: number;
@@ -214,6 +281,9 @@ export class Orchestrator {
       maxAttempts: input.maxAttempts ?? 3,
       complexity: routing.complexity,
       modelAssignments: routing.assignments,
+      executionPolicies: executionPoliciesFor(
+        this.dependencies.runner
+      ),
       stories: [],
       workspacePath,
       createdAt: now,
@@ -235,6 +305,15 @@ export class Orchestrator {
       metadata: {
         complexity: routing.complexity,
         assignments: routing.assignments
+      }
+    });
+
+    await this.recordEvent(state, {
+      actor: "ORCHESTRATOR",
+      action: "EXECUTION_POLICIES_DECIDED",
+      message: "Políticas de menor privilégio definidas para PO, Developer, QA e Runner.",
+      metadata: {
+        policies: state.executionPolicies
       }
     });
 
