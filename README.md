@@ -400,6 +400,12 @@ usa root filesystem somente leitura. Build, typecheck e testes ficam sem rede;
 somente `npm install` recebe a rede configurada. O Docker socket nunca é
 montado dentro do container.
 
+Cada run prepara um único container, reutiliza esse ambiente nas tentativas e
+o remove ao concluir, bloquear ou falhar. Início e descarte são registrados nos
+eventos `EXECUTION_ENVIRONMENT_STARTED` e
+`EXECUTION_ENVIRONMENT_DISPOSED`. Uma retomada cria outro container sobre o
+workspace persistido.
+
 Esta etapa isola os comandos npm. O Codex Developer ainda é executado no host;
 containers por persona e microVMs permanecem como evoluções documentadas em
 `docs/decisions/ADR-007-execution-isolation.md`.
@@ -434,6 +440,8 @@ Os testes cobrem atualmente:
 - allowlist do Runner;
 - proteção do diretório de execução;
 - preparação dos workspaces;
+- ciclo de vida do ambiente local ou Docker por run;
+- limites e política de rede do Docker Runner;
 - proteção de caminhos, links simbólicos e arquivos do artefato.
 
 ## Limitações conhecidas

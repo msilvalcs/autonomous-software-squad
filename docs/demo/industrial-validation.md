@@ -86,6 +86,27 @@ as skills do Developer, a execução
 Essa execução confirma tanto a ativação positiva quanto a decisão negativa
 auditável de uma skill.
 
+## Evidência de isolamento Docker
+
+Em 18 de agosto de 2026, a execução mock
+`run-5020478e-18cc-4111-9bc0-2ff901e30db9` validou o backend Docker real:
+
+- API iniciada com `EXECUTION_MODE=docker`;
+- imagem `autonomous-squad-runner:local` baseada em Node 24.19.0;
+- um único container reutilizado durante toda a run;
+- rede `bridge` disponível durante `npm install` e removida antes de build e
+  testes;
+- duas stories aprovadas e status final `COMPLETED`;
+- eventos `EXECUTION_ENVIRONMENT_STARTED` e
+  `EXECUTION_ENVIRONMENT_DISPOSED` persistidos;
+- nenhum container do squad permaneceu após a conclusão.
+
+Uma tentativa anterior registrou `RUN_FAILED` ao revelar que Docker não permite
+conectar outra rede a um container iniciado no modo privado `none`. A política
+foi corrigida para iniciar com a rede de instalação e desconectá-la antes dos
+demais comandos. Essa falha permanece no Event Store como evidência auditável
+do diagnóstico.
+
 ## Roteiro de apresentação
 
 1. Explique o briefing de qualidade e rastreabilidade industrial.

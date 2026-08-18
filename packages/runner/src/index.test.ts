@@ -127,6 +127,66 @@ describe("LocalRunner", () => {
 });
 
 describe("DockerRunner", () => {
+  it("reutiliza um container durante o ciclo de vida da run", async () => {
+    const { baseDirectory, workspace } =
+      await createWorkspace();
+    const fakeDocker = path.join(baseDirectory, "managed-docker.mjs");
+    const invocationLog = path.join(baseDirectory, "docker-calls.jsonl");
+
+    await writeFile(
+      fakeDocker,
+      [
+        "#!/usr/bin/env node",
+        "import { appendFileSync } from 'node:fs';",
+        `appendFileSync(${JSON.stringify(invocationLog)}, JSON.stringify(process.argv.slice(2)) + '\\n');`
+      ].join("\n"),
+      "utf8"
+    );
+    await chmod(fakeDocker, 0o755);
+
+    const runner = new DockerRunner({
+      baseDirectory,
+      dockerBinary: fakeDocker,
+      image: "squad-runner:test"
+    });
+
+    const environment = await runner.prepare(workspace);
+    const result = await runner.run({
+      workspace,
+      command: "npm run build",
+      timeoutMs: 10_000
+    });
+    await runner.dispose(workspace);
+
+    const calls = (await readFile(invocationLog, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as string[]);
+    const nameIndex = calls[0]?.indexOf("--name") ?? -1;
+    const containerName = calls[0]?.[nameIndex + 1];
+
+    expect(environment.environmentId).toBe(containerName);
+    expect(result.exitCode).toBe(0);
+    expect(calls).toHaveLength(4);
+    expect(calls[0]?.slice(0, 2)).toEqual([
+      "run",
+      "--detach"
+    ]);
+    expect(calls[1]).toEqual([
+      "network",
+      "disconnect",
+      "bridge",
+      containerName
+    ]);
+    expect(calls[2]?.[0]).toBe("exec");
+    expect(calls[2]).toContain(containerName);
+    expect(calls[3]).toEqual([
+      "rm",
+      "--force",
+      containerName
+    ]);
+  });
+
   it("monta uma execução isolada com limites explícitos", async () => {
     const { baseDirectory, workspace } =
       await createWorkspace();

@@ -18,16 +18,19 @@ import {
 
 const temporaryDirectories: string[] = [];
 
-async function createOrchestrator(storyPublisher?: {
-  publish: (
-    runId: string,
-    stories: UserStory[]
-  ) => Promise<Array<{
-    storyId: string;
-    number: number;
-    url: string;
-  }>>;
-}) {
+async function createOrchestrator(
+  storyPublisher?: {
+    publish: (
+      runId: string,
+      stories: UserStory[]
+    ) => Promise<Array<{
+      storyId: string;
+      number: number;
+      url: string;
+    }>>;
+  },
+  options: { failDispose?: boolean } = {}
+) {
   const directory = await mkdtemp(
     path.join(tmpdir(), "squad-orchestrator-")
   );
@@ -45,11 +48,28 @@ async function createOrchestrator(storyPublisher?: {
     timedOut: false
   };
   const executedCommands: string[] = [];
+  const lifecycleCalls: string[] = [];
 
   const runner = {
+    backend: "local" as const,
+    prepare: async (workspace: string) => {
+      lifecycleCalls.push(`prepare:${workspace}`);
+
+      return {
+        backend: "local" as const,
+        environmentId: "test-local"
+      };
+    },
     run: async (input: { command: string }) => {
       executedCommands.push(input.command);
       return successfulExecution;
+    },
+    dispose: async (workspace: string) => {
+      lifecycleCalls.push(`dispose:${workspace}`);
+
+      if (options.failDispose) {
+        throw new Error("cleanup failed");
+      }
     }
   };
 
@@ -71,7 +91,8 @@ async function createOrchestrator(storyPublisher?: {
   return {
     orchestrator,
     eventStore,
-    executedCommands
+    executedCommands,
+    lifecycleCalls
   };
 }
 
@@ -85,7 +106,7 @@ afterEach(async () => {
 
 describe("Orchestrator", () => {
   it("executa PO, Developer e QA até concluir as stories", async () => {
-    const { orchestrator, eventStore } =
+    const { orchestrator, eventStore, lifecycleCalls } =
       await createOrchestrator();
 
     const initialState = await orchestrator.createRun({
@@ -119,6 +140,24 @@ describe("Orchestrator", () => {
 
     expect(
       events.some(
+        (event) =>
+          event.action === "EXECUTION_ENVIRONMENT_STARTED"
+      )
+    ).toBe(true);
+
+    expect(
+      events.some(
+        (event) =>
+          event.action === "EXECUTION_ENVIRONMENT_DISPOSED"
+      )
+    ).toBe(true);
+
+    expect(lifecycleCalls).toHaveLength(2);
+    expect(lifecycleCalls[0]).toContain("prepare:");
+    expect(lifecycleCalls[1]).toContain("dispose:");
+
+    expect(
+      events.some(
         (event) => event.action === "IMPLEMENTATION_COMPLETED"
       )
     ).toBe(true);
@@ -142,8 +181,14 @@ describe("Orchestrator", () => {
     expect(approval?.metadata?.criteria).toBeInstanceOf(Array);
 
     expect(
-      events.at(-1)?.action
-    ).toBe("RUN_COMPLETED");
+      events.some(
+        (event) => event.action === "RUN_COMPLETED"
+      )
+    ).toBe(true);
+
+    expect(events.at(-1)?.action).toBe(
+      "EXECUTION_ENVIRONMENT_DISPOSED"
+    );
   });
 
   it("rejeita um briefing vazio", async () => {
@@ -154,6 +199,24 @@ describe("Orchestrator", () => {
         briefing: "   "
       })
     ).rejects.toThrow("Briefing cannot be empty");
+  });
+
+  it("registra falha ao limpar o ambiente", async () => {
+    const { orchestrator, eventStore } =
+      await createOrchestrator(undefined, {
+        failDispose: true
+      });
+    const state = await orchestrator.createRun({
+      briefing: "Criar uma aplicação para controle de tarefas."
+    });
+
+    const finalState = await orchestrator.execute(state);
+    const events = await eventStore.listEvents(state.runId);
+
+    expect(finalState.status).toBe("FAILED");
+    expect(events.at(-1)?.action).toBe(
+      "EXECUTION_ENVIRONMENT_CLEANUP_FAILED"
+    );
   });
 
   it("retoma uma execução persistida sem repetir stories aprovadas", async () => {

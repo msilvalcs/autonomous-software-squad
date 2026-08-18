@@ -24,6 +24,7 @@ Antes de modificar o projeto, considere:
 - a publicação de GitHub Issues é opcional, controlada pelo Orquestrador e não
   expõe o token às personas;
 - o backend Docker é opcional e o LocalRunner permanece como padrão do MVP;
+- o DockerRunner reutiliza um container por run e registra seu ciclo de vida;
 
 Não descreva uma funcionalidade planejada como já implementada.
 

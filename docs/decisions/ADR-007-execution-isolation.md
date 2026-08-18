@@ -22,14 +22,18 @@ tratado como evolução separada.
 - Selecionar o backend somente na composição da API com `EXECUTION_MODE`.
 - Manter `local` como padrão e exigir `docker` explicitamente, sem fallback
   silencioso para modo desconhecido.
-- Usar um container efêmero por comando e montar somente o workspace validado
-  em `/workspace`.
+- Usar um container efêmero por run, montar somente o workspace validado em
+  `/workspace` e reutilizá-lo nas tentativas e comandos daquela execução.
 - Executar com usuário sem root, root filesystem somente leitura, `tmpfs` em
   `/tmp`, capabilities removidas, `no-new-privileges` e limites de CPU, memória
   e PIDs.
-- Negar rede para build, typecheck e testes. `npm install` usa a rede configurada
-  para obter dependências.
-- Remover explicitamente o container quando o timeout for atingido.
+- Iniciar o ambiente na rede de instalação, desconectá-la após `npm install` e
+  garantir a desconexão antes de build, typecheck ou testes. Em uma retomada
+  que não reinstala dependências, o primeiro comando também remove a rede.
+- Remover explicitamente o container em `finally` ao concluir, bloquear ou
+  falhar a run, além de removê-lo quando um timeout for atingido.
+- Registrar início e descarte do ambiente na auditoria com backend, imagem e
+  identificador do container.
 - Não montar o Docker socket e não incorporar credenciais na imagem.
 - Fixar a imagem Node por versão e digest para tornar a base reproduzível.
 
@@ -52,5 +56,7 @@ tratado como evolução separada.
 - A rede negada pode revelar testes que dependem indevidamente de serviços
   externos.
 - O workspace continua persistido no host para suportar retomada e artefatos.
+- A retomada cria um novo container e reutiliza o workspace persistido, sem
+  depender de um processo anterior.
 - Codex Developer, PO e QA permanecem no host nesta etapa. Containers por
   persona e microVMs continuam como diferenciais posteriores.

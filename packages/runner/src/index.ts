@@ -31,9 +31,17 @@ export interface ExecutionResult {
 
 export type ExecutionBackend = "local" | "docker";
 
+export interface ExecutionEnvironment {
+  backend: ExecutionBackend;
+  environmentId: string;
+  image?: string;
+}
+
 export interface ExecutionRunner {
   readonly backend: ExecutionBackend;
+  prepare(workspace: string): Promise<ExecutionEnvironment>;
   run(request: ExecutionRequest): Promise<ExecutionResult>;
+  dispose(workspace: string): Promise<void>;
 }
 
 const commandArguments: Record<AllowedCommand, string[]> = {
@@ -49,6 +57,19 @@ export class LocalRunner implements ExecutionRunner {
 
   constructor(baseDirectory: string) {
     this.baseDirectory = path.resolve(baseDirectory);
+  }
+
+  async prepare(workspace: string): Promise<ExecutionEnvironment> {
+    const resolvedWorkspace = this.resolveWorkspace(workspace);
+
+    return {
+      backend: this.backend,
+      environmentId: `local-${path.basename(resolvedWorkspace)}`
+    };
+  }
+
+  async dispose(workspace: string): Promise<void> {
+    this.resolveWorkspace(workspace);
   }
 
   async run(
@@ -166,6 +187,8 @@ export class DockerRunner implements ExecutionRunner {
   private readonly memoryLimit: string;
   private readonly pidsLimit: number;
   private readonly installNetwork: string;
+  private readonly environments = new Map<string, string>();
+  private readonly networkConnectedWorkspaces = new Set<string>();
 
   constructor(options: DockerRunnerOptions) {
     this.baseDirectory = path.resolve(options.baseDirectory);
@@ -189,6 +212,67 @@ export class DockerRunner implements ExecutionRunner {
     }
   }
 
+  async prepare(workspace: string): Promise<ExecutionEnvironment> {
+    const resolvedWorkspace = resolveAllowedWorkspace(
+      this.baseDirectory,
+      workspace
+    );
+    const existing = this.environments.get(resolvedWorkspace);
+
+    if (existing) {
+      return {
+        backend: this.backend,
+        environmentId: existing,
+        image: this.image
+      };
+    }
+
+    const containerName = createContainerName(resolvedWorkspace);
+    const args = [
+      "run",
+      "--detach",
+      ...this.containerSecurityArguments(
+        resolvedWorkspace,
+        containerName,
+        this.installNetwork
+      ),
+      this.image,
+      "node",
+      "-e",
+      "setInterval(() => {}, 2147483647)"
+    ];
+
+    await runControlCommand(
+      this.dockerBinary,
+      args,
+      resolvedWorkspace
+    );
+    this.environments.set(resolvedWorkspace, containerName);
+    this.networkConnectedWorkspaces.add(resolvedWorkspace);
+
+    return {
+      backend: this.backend,
+      environmentId: containerName,
+      image: this.image
+    };
+  }
+
+  async dispose(workspace: string): Promise<void> {
+    const resolvedWorkspace = resolveAllowedWorkspace(
+      this.baseDirectory,
+      workspace
+    );
+    const containerName = this.environments.get(resolvedWorkspace);
+
+    if (!containerName) {
+      return;
+    }
+
+    this.environments.delete(resolvedWorkspace);
+    this.networkConnectedWorkspaces.delete(resolvedWorkspace);
+    await removeContainer(this.dockerBinary, containerName, true);
+  }
+
   async run(
     request: ExecutionRequest
   ): Promise<ExecutionResult> {
@@ -209,9 +293,18 @@ export class DockerRunner implements ExecutionRunner {
       throw new Error("timeoutMs must be greater than zero");
     }
 
+    const managedContainer = this.environments.get(workspace);
+
+    if (managedContainer) {
+      return this.runInManagedContainer(
+        request,
+        workspace,
+        command,
+        managedContainer
+      );
+    }
+
     const containerName = createContainerName(workspace);
-    const userId = process.getuid?.() ?? 1000;
-    const groupId = process.getgid?.() ?? 1000;
     const network =
       request.command === "npm install"
         ? this.installNetwork
@@ -220,8 +313,39 @@ export class DockerRunner implements ExecutionRunner {
     const args = [
       "run",
       "--rm",
+      ...this.containerSecurityArguments(
+        workspace,
+        containerName,
+        network
+      ),
+      this.image,
+      "npm",
+      ...command
+    ];
+
+    return runDockerProcess({
+      dockerBinary: this.dockerBinary,
+      args,
+      workspace,
+      request,
+      onTimeout: () =>
+        removeContainer(this.dockerBinary, containerName)
+    });
+  }
+
+  private containerSecurityArguments(
+    workspace: string,
+    containerName: string,
+    network: string
+  ): string[] {
+    const userId = process.getuid?.() ?? 1000;
+    const groupId = process.getgid?.() ?? 1000;
+
+    return [
       "--name",
       containerName,
+      "--label",
+      `com.autonomous-squad.workspace=${path.basename(workspace)}`,
       "--workdir",
       "/workspace",
       "--mount",
@@ -248,74 +372,92 @@ export class DockerRunner implements ExecutionRunner {
       "--env",
       "HOME=/tmp",
       "--env",
-      "NPM_CONFIG_CACHE=/tmp/.npm",
-      this.image,
-      "npm",
-      ...command
+      "NPM_CONFIG_CACHE=/tmp/.npm"
     ];
+  }
 
-    const startedAt = Date.now();
+  private async runInManagedContainer(
+    request: ExecutionRequest,
+    workspace: string,
+    command: string[],
+    containerName: string
+  ): Promise<ExecutionResult> {
+    const needsNetwork = request.command === "npm install";
+    const hasNetwork =
+      this.networkConnectedWorkspaces.has(workspace);
 
-    return new Promise((resolve, reject) => {
-      let stdout = "";
-      let stderr = "";
-      let timedOut = false;
-      let settled = false;
-      let timeoutCleanup: Promise<void> | undefined;
+    if (needsNetwork && !hasNetwork) {
+      await runControlCommand(
+        this.dockerBinary,
+        ["network", "connect", this.installNetwork, containerName],
+        workspace
+      );
+      this.networkConnectedWorkspaces.add(workspace);
+    }
 
-      const child = spawn(this.dockerBinary, args, {
-        cwd: workspace,
-        shell: false,
-        env: {
-          ...process.env,
-          CI: "true"
-        }
-      });
-
-      const timeout = setTimeout(() => {
-        timedOut = true;
-        timeoutCleanup = removeContainer(
-          this.dockerBinary,
+    if (!needsNetwork && hasNetwork) {
+      await runControlCommand(
+        this.dockerBinary,
+        [
+          "network",
+          "disconnect",
+          this.installNetwork,
           containerName
+        ],
+        workspace
+      );
+      this.networkConnectedWorkspaces.delete(workspace);
+    }
+
+    try {
+      const userId = process.getuid?.() ?? 1000;
+      const groupId = process.getgid?.() ?? 1000;
+
+      return await runDockerProcess({
+        dockerBinary: this.dockerBinary,
+        args: [
+          "exec",
+          "--user",
+          `${userId}:${groupId}`,
+          "--workdir",
+          "/workspace",
+          "--env",
+          "CI=true",
+          "--env",
+          "HOME=/tmp",
+          "--env",
+          "NPM_CONFIG_CACHE=/tmp/.npm",
+          containerName,
+          "npm",
+          ...command
+        ],
+        workspace,
+        request,
+        onTimeout: async () => {
+          this.environments.delete(workspace);
+          this.networkConnectedWorkspaces.delete(workspace);
+          await removeContainer(this.dockerBinary, containerName);
+        }
+      });
+    } finally {
+      if (
+        needsNetwork &&
+        this.environments.has(workspace) &&
+        this.networkConnectedWorkspaces.has(workspace)
+      ) {
+        await runControlCommand(
+          this.dockerBinary,
+          [
+            "network",
+            "disconnect",
+            this.installNetwork,
+            containerName
+          ],
+          workspace
         );
-        child.kill("SIGTERM");
-      }, request.timeoutMs);
-
-      child.stdout.on("data", (chunk: Buffer) => {
-        stdout += chunk.toString();
-      });
-
-      child.stderr.on("data", (chunk: Buffer) => {
-        stderr += chunk.toString();
-      });
-
-      child.on("error", (error) => {
-        clearTimeout(timeout);
-
-        if (!settled) {
-          settled = true;
-          reject(error);
-        }
-      });
-
-      child.on("close", async (exitCode) => {
-        clearTimeout(timeout);
-
-        if (!settled) {
-          settled = true;
-          await timeoutCleanup;
-
-          resolve({
-            command: request.command,
-            exitCode,
-            stdout,
-            stderr,
-            durationMs: Date.now() - startedAt,
-            timedOut
-          });
-        }
-      });
-    });
+        this.networkConnectedWorkspaces.delete(workspace);
+      }
+    }
   }
 }
 
@@ -372,22 +514,149 @@ function createContainerName(workspace: string): string {
   return `squad-${workspaceName}-${randomUUID().slice(0, 8)}`;
 }
 
+interface RunDockerProcessInput {
+  dockerBinary: string;
+  args: string[];
+  workspace: string;
+  request: ExecutionRequest;
+  onTimeout: () => Promise<void>;
+}
+
+async function runDockerProcess(
+  input: RunDockerProcessInput
+): Promise<ExecutionResult> {
+  const startedAt = Date.now();
+
+  return new Promise((resolve, reject) => {
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    let settled = false;
+    let timeoutCleanup: Promise<void> | undefined;
+
+    const child = spawn(input.dockerBinary, input.args, {
+      cwd: input.workspace,
+      shell: false,
+      env: {
+        ...process.env,
+        CI: "true"
+      }
+    });
+
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      timeoutCleanup = input.onTimeout();
+      child.kill("SIGTERM");
+    }, input.request.timeoutMs);
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+
+    child.on("error", (error) => {
+      clearTimeout(timeout);
+
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
+    });
+
+    child.on("close", async (exitCode) => {
+      clearTimeout(timeout);
+
+      if (!settled) {
+        settled = true;
+        await timeoutCleanup;
+
+        resolve({
+          command: input.request.command,
+          exitCode,
+          stdout,
+          stderr,
+          durationMs: Date.now() - startedAt,
+          timedOut
+        });
+      }
+    });
+  });
+}
+
+async function runControlCommand(
+  dockerBinary: string,
+  args: string[],
+  workspace: string
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    let stderr = "";
+    const child = spawn(dockerBinary, args, {
+      cwd: workspace,
+      shell: false,
+      env: process.env,
+      stdio: ["ignore", "ignore", "pipe"]
+    });
+
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+
+    child.on("error", reject);
+    child.on("close", (exitCode) => {
+      if (exitCode === 0) {
+        resolve();
+      } else {
+        reject(
+          new Error(
+            `Docker control command failed with exit code ${exitCode}: ${stderr.slice(0, 2_000)}`
+          )
+        );
+      }
+    });
+  });
+}
+
 async function removeContainer(
   dockerBinary: string,
-  containerName: string
+  containerName: string,
+  strict = false
 ): Promise<void> {
-  await new Promise<void>((resolve) => {
+  await new Promise<void>((resolve, reject) => {
+    let stderr = "";
     const cleanup = spawn(
       dockerBinary,
       ["rm", "--force", containerName],
       {
         shell: false,
-        stdio: "ignore"
+        stdio: ["ignore", "ignore", "pipe"]
       }
     );
 
-    cleanup.on("error", () => resolve());
-    cleanup.on("close", () => resolve());
+    cleanup.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+
+    cleanup.on("error", (error) => {
+      if (strict) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    });
+    cleanup.on("close", (exitCode) => {
+      if (strict && exitCode !== 0) {
+        reject(
+          new Error(
+            `Docker container cleanup failed with exit code ${exitCode}: ${stderr.slice(0, 2_000)}`
+          )
+        );
+      } else {
+        resolve();
+      }
+    });
   });
 }
 

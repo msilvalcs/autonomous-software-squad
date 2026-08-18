@@ -18,6 +18,7 @@ import type {
 import { QaResultSchema } from "@squad/schemas";
 
 import type {
+  ExecutionEnvironment,
   ExecutionRunner,
   WorkspaceManager
 } from "@squad/runner";
@@ -27,7 +28,7 @@ export interface OrchestratorDependencies {
   developer: DeveloperAgent;
   qa: QualityAssuranceAgent;
   eventStore: JsonlEventStore;
-  runner: Pick<ExecutionRunner, "run">;
+  runner: ExecutionRunner;
   workspaceManager: Pick<
     WorkspaceManager,
     "prepareWorkspace"
@@ -256,7 +257,25 @@ export class Orchestrator {
     state: RunState,
     resuming: boolean
   ): Promise<RunState> {
+    let environment: ExecutionEnvironment | undefined;
+
     try {
+      environment = await this.dependencies.runner.prepare(
+        state.workspacePath
+      );
+
+      await this.recordEvent(state, {
+        actor: "RUNNER",
+        action: "EXECUTION_ENVIRONMENT_STARTED",
+        message: `Ambiente ${environment.backend} preparado para a execução.`,
+        metadata: {
+          backend: environment.backend,
+          environmentId: environment.environmentId,
+          image: environment.image ?? null,
+          resumed: resuming
+        }
+      });
+
       const previousEvents = resuming
         ? await this.dependencies.eventStore.listEvents(state.runId)
         : [];
@@ -539,6 +558,40 @@ export class Orchestrator {
       });
 
       return state;
+    } finally {
+      if (environment) {
+        try {
+          await this.dependencies.runner.dispose(state.workspacePath);
+
+          await this.recordEvent(state, {
+            actor: "RUNNER",
+            action: "EXECUTION_ENVIRONMENT_DISPOSED",
+            message: `Ambiente ${environment.backend} removido após a execução.`,
+            metadata: {
+              backend: environment.backend,
+              environmentId: environment.environmentId,
+              image: environment.image ?? null
+            }
+          });
+        } catch (error) {
+          state.status = "FAILED";
+          await this.persistState(state);
+
+          await this.recordEvent(state, {
+            actor: "RUNNER",
+            action: "EXECUTION_ENVIRONMENT_CLEANUP_FAILED",
+            message: "Falha ao remover o ambiente de execução.",
+            metadata: {
+              backend: environment.backend,
+              environmentId: environment.environmentId,
+              errorType:
+                error instanceof Error
+                  ? error.constructor.name
+                  : "UnknownError"
+            }
+          });
+        }
+      }
     }
   }
 
