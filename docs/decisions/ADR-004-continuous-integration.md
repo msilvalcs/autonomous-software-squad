@@ -25,6 +25,11 @@ O CI usa `LLM_PROVIDER=mock`, não acessa credenciais e possui apenas permissão
 de leitura do conteúdo. Execuções mais antigas da mesma referência são
 canceladas para evitar consumo desnecessário.
 
+Como os pacotes internos publicam tipos a partir de `dist`, os scripts raiz
+compilam esses pacotes em ordem de dependência antes de typecheck, testes ou
+build das aplicações. Assim, os mesmos comandos funcionam em um clone limpo e
+não dependem de arquivos gerados por uma execução anterior.
+
 ## Alternativas consideradas
 
 - Separar cada comando em um job: melhora o paralelismo, mas repete instalação

@@ -4,10 +4,11 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "npm run test --workspaces --if-present",
+    "build:packages": "npm run build -w @squad/schemas && npm run build -w @squad/codex-client && npm run build -w @squad/runner && npm run build -w @squad/agents && npm run build -w @squad/event-store && npm run build -w @squad/orchestrator",
+    "test": "npm run build:packages && npm run test --workspaces --if-present",
     "dev": "concurrently \"npm run dev -w apps/api\" \"npm run dev -w apps/dashboard\"",
-    "build": "npm run build --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "build": "npm run build:packages && npm run build -w @squad/api && npm run build -w @squad/dashboard",
+    "typecheck": "npm run build:packages && npm run typecheck --workspaces --if-present"
   },
   "keywords": [],
   "author": "",

@@ -351,6 +351,10 @@ pushes na `main`, pull requests e acionamentos manuais. O CI usa o provider
 mock e não depende de credenciais de LLM. Consulte
 `docs/decisions/ADR-004-continuous-integration.md`.
 
+Os comandos raiz compilam os pacotes internos em ordem de dependência antes de
+validar as aplicações. Portanto, também funcionam em um clone limpo, sem
+arquivos `dist` preexistentes.
+
 Os testes cobrem atualmente:
 
 - validação dos schemas;
