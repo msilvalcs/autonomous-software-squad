@@ -49,6 +49,27 @@ aprovadas, registrou `RUN_RESUMED` e `STORY_RESUMED`, continuou a tentativa
 pendente e encerrou com 5 de 5 stories aprovadas e 45 eventos. Essa execução
 comprova a continuidade do Orquestrador sem esconder ou apagar a interrupção.
 
+## Evidência de skills e rota de alta complexidade
+
+A execução `run-f0960d51-60c0-4e93-8460-0179afc3ca88` validou o briefing
+industrial ampliado depois da incorporação das skills:
+
+- complexidade `HIGH`;
+- PO e Developer em `gpt-5.6-sol`, esforço high;
+- QA em `gpt-5.6-sol`, esforço xhigh;
+- 6 de 6 stories aprovadas;
+- 49 eventos e 76 decisões auditadas;
+- 9 ativações de skills registradas, incluindo `backlog-decomposition`, `tdd`
+  e `diagnosing-bugs`;
+- 35 arquivos e 469.910 bytes no artefato entregue;
+- duração total de aproximadamente 46 minutos.
+
+O PO registrou explicitamente por que usou a decomposição, o resultado e três
+alternativas rejeitadas. Developer e QA também registraram objetivo e resultado
+das skills utilizadas. Não houve reprovação nessa execução: o QA aprovou todas
+as stories na primeira tentativa. Essa informação é mantida para não apresentar
+um ciclo corretivo artificial como evidência real.
+
 ## Roteiro de apresentação
 
 1. Explique o briefing de qualidade e rastreabilidade industrial.
