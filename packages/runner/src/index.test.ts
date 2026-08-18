@@ -189,7 +189,9 @@ describe("DockerRunner", () => {
       [
         "#!/usr/bin/env node",
         "import { appendFileSync } from 'node:fs';",
-        `appendFileSync(${JSON.stringify(invocationLog)}, JSON.stringify(process.argv.slice(2)) + '\\n');`
+        "const args = process.argv.slice(2);",
+        `appendFileSync(${JSON.stringify(invocationLog)}, JSON.stringify(args) + '\\n');`,
+        "if (args[0] === 'inspect') console.log('sha256:test-image');"
       ].join("\n"),
       "utf8"
     );
@@ -217,21 +219,28 @@ describe("DockerRunner", () => {
     const containerName = calls[0]?.[nameIndex + 1];
 
     expect(environment.environmentId).toBe(containerName);
+    expect(environment.imageDigest).toBe("sha256:test-image");
     expect(result.exitCode).toBe(0);
-    expect(calls).toHaveLength(4);
+    expect(calls).toHaveLength(5);
     expect(calls[0]?.slice(0, 2)).toEqual([
       "run",
       "--detach"
     ]);
     expect(calls[1]).toEqual([
+      "inspect",
+      "--format",
+      "{{.Image}}",
+      containerName
+    ]);
+    expect(calls[2]).toEqual([
       "network",
       "disconnect",
       "bridge",
       containerName
     ]);
-    expect(calls[2]?.[0]).toBe("exec");
-    expect(calls[2]).toContain(containerName);
-    expect(calls[3]).toEqual([
+    expect(calls[3]?.[0]).toBe("exec");
+    expect(calls[3]).toContain(containerName);
+    expect(calls[4]).toEqual([
       "rm",
       "--force",
       containerName

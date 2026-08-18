@@ -23,7 +23,8 @@ export const ExecutionPolicySchema = z.object({
   runtime: z.enum([
     "host-codex",
     "local-process",
-    "docker-container"
+    "docker-container",
+    "microvm"
   ]),
   workspaceAccess: z.enum([
     "repository-read-only",

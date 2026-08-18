@@ -411,6 +411,12 @@ PO, Developer, QA e Runner. PO e QA usam sandbox somente leitura, Developer usa
 escrita limitada ao workspace da run e o Runner mantém a allowlist de comandos.
 Consulte `docs/decisions/ADR-008-persona-execution-policies.md`.
 
+O dashboard apresenta essa matriz por etapa e permite filtrar a timeline por
+eventos de infraestrutura. Em Docker, a auditoria inclui tag, digest real da
+imagem, rede, limites e duração. O manifesto final expõe a mesma proveniência
+por uma allowlist sem segredos. Consulte
+`docs/decisions/ADR-009-environment-observability.md`.
+
 Esta etapa isola os comandos npm. O Codex Developer ainda é executado no host.
 Containers por persona e microVMs permanecem como evoluções documentadas nos
 ADRs 007 e 008.

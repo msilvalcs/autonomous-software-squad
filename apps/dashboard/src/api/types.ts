@@ -47,7 +47,11 @@ export interface RunState {
 
 export interface ExecutionPolicy {
   actor: "PO" | "DEV" | "QA" | "RUNNER";
-  runtime: "host-codex" | "local-process" | "docker-container";
+  runtime:
+    | "host-codex"
+    | "local-process"
+    | "docker-container"
+    | "microvm";
   workspaceAccess:
     | "repository-read-only"
     | "run-read-only"
@@ -129,6 +133,20 @@ export interface ArtifactManifest {
     decisions: number;
     durationMs: number;
   };
+  environmentProvenance: {
+    backend: string | null;
+    environmentId: string | null;
+    image: string | null;
+    imageDigest: string | null;
+    networkAccess: string | null;
+    limits: Record<string, unknown> | null;
+    reason: string | null;
+    stages: Array<{
+      stage: string;
+      action: string;
+      durationMs: number;
+    }>;
+  } | null;
 }
 
 export interface RunSummary {

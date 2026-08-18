@@ -29,7 +29,7 @@ import {
 } from "@squad/runner";
 
 import { CodexClient } from "@squad/codex-client";
-import type { RunState } from "@squad/schemas";
+import type { AuditEvent, RunState } from "@squad/schemas";
 
 import {
   createArtifactArchive,
@@ -243,6 +243,17 @@ const documentationFiles = [
     )
   },
   {
+    id: "environment-observability",
+    title: "ADR-009: Observabilidade do ambiente",
+    category: "Arquitetura",
+    path: path.join(
+      repositoryRoot,
+      "docs",
+      "decisions",
+      "ADR-009-environment-observability.md"
+    )
+  },
+  {
     id: "industrial-validation",
     title: "Validação industrial",
     category: "Demonstração",
@@ -418,10 +429,25 @@ app.post<{
     return reply.status(404).send({ error: "Run not found" });
   }
 
-  if (["COMPLETED", "BLOCKED", "FAILED"].includes(state.status)) {
+  if (["COMPLETED", "BLOCKED"].includes(state.status)) {
     return reply.status(409).send({
       error: "Run cannot be resumed from its current status"
     });
+  }
+
+  if (state.status === "FAILED") {
+    const events = await eventStore.listEvents(state.runId);
+    const retryable = [...events].reverse().some(
+      (event) =>
+        event.actor === "RUNNER" &&
+        event.metadata?.retryable === true
+    );
+
+    if (!retryable) {
+      return reply.status(409).send({
+        error: "Run cannot be resumed from its current status"
+      });
+    }
   }
 
   startExecution(state, true);
@@ -509,7 +535,8 @@ app.get<{
       durationMs:
         new Date(state.updatedAt).getTime() -
         new Date(state.createdAt).getTime()
-    }
+    },
+    environmentProvenance: createEnvironmentProvenance(events)
   };
 });
 
@@ -728,6 +755,63 @@ function parseRoutingOverrides(
   }
 
   return parsed as RoutingOverrides;
+}
+
+function createEnvironmentProvenance(events: AuditEvent[]) {
+  const backendDecision = events.find(
+    (event) => event.action === "EXECUTION_BACKEND_DECIDED"
+  );
+  const environmentStarted = events.find(
+    (event) => event.action === "EXECUTION_ENVIRONMENT_STARTED"
+  );
+
+  if (!backendDecision && !environmentStarted) {
+    return null;
+  }
+
+  const metadata = environmentStarted?.metadata ??
+    backendDecision?.metadata ?? {};
+  const stageEvents = events.filter(
+    (event) =>
+      typeof event.metadata?.stage === "string" &&
+      typeof event.metadata?.durationMs === "number"
+  );
+
+  return {
+    backend:
+      typeof metadata.backend === "string"
+        ? metadata.backend
+        : null,
+    environmentId:
+      typeof metadata.environmentId === "string"
+        ? metadata.environmentId
+        : null,
+    image:
+      typeof metadata.image === "string"
+        ? metadata.image
+        : null,
+    imageDigest:
+      typeof metadata.imageDigest === "string"
+        ? metadata.imageDigest
+        : null,
+    networkAccess:
+      typeof metadata.networkAccess === "string"
+        ? metadata.networkAccess
+        : null,
+    limits:
+      typeof metadata.limits === "object" && metadata.limits !== null
+        ? metadata.limits
+        : null,
+    reason:
+      typeof backendDecision?.metadata?.reason === "string"
+        ? backendDecision.metadata.reason
+        : null,
+    stages: stageEvents.map((event) => ({
+      stage: event.metadata?.stage,
+      action: event.action,
+      durationMs: event.metadata?.durationMs
+    }))
+  };
 }
 
 function createGitHubIssuesPublisher():

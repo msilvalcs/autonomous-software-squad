@@ -29,7 +29,10 @@ async function createOrchestrator(
       url: string;
     }>>;
   },
-  options: { failDispose?: boolean } = {}
+  options: {
+    failDispose?: boolean;
+    failPrepareOnce?: boolean;
+  } = {}
 ) {
   const directory = await mkdtemp(
     path.join(tmpdir(), "squad-orchestrator-")
@@ -49,6 +52,7 @@ async function createOrchestrator(
   };
   const executedCommands: string[] = [];
   const lifecycleCalls: string[] = [];
+  let preparationAttempts = 0;
 
   const runner = {
     backend: "local" as const,
@@ -73,7 +77,15 @@ async function createOrchestrator(
       }
     },
     prepare: async (workspace: string) => {
+      preparationAttempts += 1;
       lifecycleCalls.push(`prepare:${workspace}`);
+
+      if (
+        options.failPrepareOnce &&
+        preparationAttempts === 1
+      ) {
+        throw new Error("prepare failed");
+      }
 
       return {
         backend: "local" as const,
@@ -169,9 +181,28 @@ describe("Orchestrator", () => {
     expect(
       events.some(
         (event) =>
+          event.action === "EXECUTION_BACKEND_DECIDED" &&
+          event.metadata?.backend === "local"
+      )
+    ).toBe(true);
+
+    expect(
+      events.some(
+        (event) =>
           event.action === "EXECUTION_ENVIRONMENT_STARTED"
       )
     ).toBe(true);
+
+    const buildEvent = events.find(
+      (event) => event.action === "BUILD_COMPLETED"
+    );
+
+    expect(buildEvent?.metadata).toMatchObject({
+      backend: "local",
+      stage: "BUILD",
+      durationMs: 10,
+      networkAccess: "host"
+    });
 
     expect(
       events.some(
@@ -244,6 +275,44 @@ describe("Orchestrator", () => {
     expect(finalState.status).toBe("FAILED");
     expect(events.at(-1)?.action).toBe(
       "EXECUTION_ENVIRONMENT_CLEANUP_FAILED"
+    );
+  });
+
+  it("permite retomar falha de criação do ambiente", async () => {
+    const { orchestrator, eventStore } =
+      await createOrchestrator(undefined, {
+        failPrepareOnce: true
+      });
+    const state = await orchestrator.createRun({
+      briefing: "Criar uma aplicação para controle de tarefas."
+    });
+
+    const failedState = await orchestrator.execute(state);
+    const failedStatus = failedState.status;
+    const recoveredState = await orchestrator.resume(failedState);
+    const events = await eventStore.listEvents(state.runId);
+
+    expect(failedStatus).toBe("FAILED");
+    expect(recoveredState.status).toBe("COMPLETED");
+    expect(
+      events.some(
+        (event) =>
+          event.action ===
+          "EXECUTION_ENVIRONMENT_CREATION_FAILED" &&
+          event.metadata?.retryable === true
+      )
+    ).toBe(true);
+  });
+
+  it("não retoma falha sem evidência de infraestrutura", async () => {
+    const { orchestrator } = await createOrchestrator();
+    const state = await orchestrator.createRun({
+      briefing: "Criar uma aplicação para controle de tarefas."
+    });
+    state.status = "FAILED";
+
+    await expect(orchestrator.resume(state)).rejects.toThrow(
+      "cannot be resumed"
     );
   });
 

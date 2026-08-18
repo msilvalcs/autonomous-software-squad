@@ -36,6 +36,7 @@ export interface ExecutionEnvironment {
   backend: ExecutionBackend;
   environmentId: string;
   image?: string;
+  imageDigest?: string;
 }
 
 export interface RunnerExecutionPolicy {
@@ -259,6 +260,7 @@ export class DockerRunner implements ExecutionRunner {
   private readonly pidsLimit: number;
   private readonly installNetwork: string;
   private readonly environments = new Map<string, string>();
+  private readonly imageDigests = new Map<string, string>();
   private readonly networkConnectedWorkspaces = new Set<string>();
 
   get policy(): RunnerExecutionPolicy {
@@ -312,7 +314,8 @@ export class DockerRunner implements ExecutionRunner {
       return {
         backend: this.backend,
         environmentId: existing,
-        image: this.image
+        image: this.image,
+        imageDigest: this.imageDigests.get(resolvedWorkspace)
       };
     }
 
@@ -331,18 +334,41 @@ export class DockerRunner implements ExecutionRunner {
       "setInterval(() => {}, 2147483647)"
     ];
 
-    await runControlCommand(
-      this.dockerBinary,
-      args,
-      resolvedWorkspace
-    );
+    let imageDigest: string | undefined;
+
+    try {
+      await runControlCommand(
+        this.dockerBinary,
+        args,
+        resolvedWorkspace
+      );
+      imageDigest = (
+        await runControlCommand(
+          this.dockerBinary,
+          ["inspect", "--format", "{{.Image}}", containerName],
+          resolvedWorkspace
+        )
+      ).trim() || undefined;
+    } catch (error) {
+      await removeContainer(
+        this.dockerBinary,
+        containerName
+      );
+      throw error;
+    }
+
     this.environments.set(resolvedWorkspace, containerName);
     this.networkConnectedWorkspaces.add(resolvedWorkspace);
+
+    if (imageDigest) {
+      this.imageDigests.set(resolvedWorkspace, imageDigest);
+    }
 
     return {
       backend: this.backend,
       environmentId: containerName,
-      image: this.image
+      image: this.image,
+      imageDigest
     };
   }
 
@@ -357,9 +383,10 @@ export class DockerRunner implements ExecutionRunner {
       return;
     }
 
-    this.environments.delete(resolvedWorkspace);
-    this.networkConnectedWorkspaces.delete(resolvedWorkspace);
     await removeContainer(this.dockerBinary, containerName, true);
+    this.environments.delete(resolvedWorkspace);
+    this.imageDigests.delete(resolvedWorkspace);
+    this.networkConnectedWorkspaces.delete(resolvedWorkspace);
   }
 
   async run(
@@ -522,6 +549,7 @@ export class DockerRunner implements ExecutionRunner {
         request,
         onTimeout: async () => {
           this.environments.delete(workspace);
+          this.imageDigests.delete(workspace);
           this.networkConnectedWorkspaces.delete(workspace);
           await removeContainer(this.dockerBinary, containerName);
         }
@@ -692,14 +720,19 @@ async function runControlCommand(
   dockerBinary: string,
   args: string[],
   workspace: string
-): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
+): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    let stdout = "";
     let stderr = "";
     const child = spawn(dockerBinary, args, {
       cwd: workspace,
       shell: false,
       env: process.env,
-      stdio: ["ignore", "ignore", "pipe"]
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
     });
 
     child.stderr.on("data", (chunk: Buffer) => {
@@ -709,7 +742,7 @@ async function runControlCommand(
     child.on("error", reject);
     child.on("close", (exitCode) => {
       if (exitCode === 0) {
-        resolve();
+        resolve(stdout);
       } else {
         reject(
           new Error(

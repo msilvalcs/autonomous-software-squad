@@ -317,6 +317,23 @@ export class Orchestrator {
       }
     });
 
+    await this.recordEvent(state, {
+      actor: "ORCHESTRATOR",
+      action: "EXECUTION_BACKEND_DECIDED",
+      message:
+        this.dependencies.runner.backend === "docker"
+          ? "Docker selecionado para isolar os comandos da run."
+          : "Runner local selecionado para compatibilidade de desenvolvimento.",
+      metadata: {
+        backend: this.dependencies.runner.backend,
+        reason:
+          this.dependencies.runner.backend === "docker"
+            ? "EXECUTION_MODE=docker ativa isolamento, limites e rede controlada."
+            : "O modo local é o padrão quando nenhum backend isolado é solicitado.",
+        policy: this.dependencies.runner.policy
+      }
+    });
+
     return state;
   }
 
@@ -325,8 +342,23 @@ export class Orchestrator {
   }
 
   async resume(state: RunState): Promise<RunState> {
-    if (["COMPLETED", "BLOCKED", "FAILED"].includes(state.status)) {
+    if (["COMPLETED", "BLOCKED"].includes(state.status)) {
       throw new Error(`Run ${state.runId} cannot be resumed`);
+    }
+
+    if (state.status === "FAILED") {
+      const events = await this.dependencies.eventStore.listEvents(
+        state.runId
+      );
+      const retryable = [...events].reverse().some(
+        (event) =>
+          event.actor === "RUNNER" &&
+          event.metadata?.retryable === true
+      );
+
+      if (!retryable) {
+        throw new Error(`Run ${state.runId} cannot be resumed`);
+      }
     }
 
     return this.run(state, true);
@@ -339,20 +371,40 @@ export class Orchestrator {
     let environment: ExecutionEnvironment | undefined;
 
     try {
-      environment = await this.dependencies.runner.prepare(
-        state.workspacePath
-      );
+      const preparationStartedAt = Date.now();
+
+      try {
+        environment = await this.dependencies.runner.prepare(
+          state.workspacePath
+        );
+      } catch (error) {
+        await this.recordEvent(state, {
+          actor: "RUNNER",
+          action: "EXECUTION_ENVIRONMENT_CREATION_FAILED",
+          message: "Falha ao preparar o ambiente de execução. A run pode ser retomada.",
+          metadata: {
+            backend: this.dependencies.runner.backend,
+            stage: "PREPARE",
+            durationMs: Date.now() - preparationStartedAt,
+            policy: this.dependencies.runner.policy,
+            retryable: true,
+            errorType:
+              error instanceof Error
+                ? error.constructor.name
+                : "UnknownError"
+          }
+        });
+        throw error;
+      }
 
       await this.recordEvent(state, {
         actor: "RUNNER",
         action: "EXECUTION_ENVIRONMENT_STARTED",
         message: `Ambiente ${environment.backend} preparado para a execução.`,
-        metadata: {
-          backend: environment.backend,
-          environmentId: environment.environmentId,
-          image: environment.image ?? null,
+        metadata: this.environmentMetadata(environment, "PREPARE", {
+          durationMs: Date.now() - preparationStartedAt,
           resumed: resuming
-        }
+        })
       });
 
       const previousEvents = resuming
@@ -381,11 +433,16 @@ export class Orchestrator {
 
       if (needsPlanning) {
         await this.changeStatus(state, "PLANNING");
+        const planningStartedAt = Date.now();
 
         await this.recordEvent(state, {
           actor: "PO",
           action: "PLANNING_STARTED",
-          message: "PO iniciou a análise do briefing."
+          message: "PO iniciou a análise do briefing.",
+          metadata: {
+            stage: "PLANNING",
+            executionPolicy: this.policyFor(state, "PO")
+          }
         });
 
         const backlog = await this.dependencies.po.createBacklog(
@@ -399,6 +456,9 @@ export class Orchestrator {
           action: "STORIES_CREATED",
           message: `${state.stories.length} stories foram criadas.`,
           metadata: {
+            stage: "PLANNING",
+            durationMs: Date.now() - planningStartedAt,
+            executionPolicy: this.policyFor(state, "PO"),
             storyIds: state.stories.map((story) => story.id),
             decisions: backlog.decisions
           }
@@ -409,7 +469,7 @@ export class Orchestrator {
       }
 
       if (needsDependencyInstall) {
-        await this.installDependencies(state);
+        await this.installDependencies(state, environment);
       }
 
       for (const story of state.stories) {
@@ -440,6 +500,7 @@ export class Orchestrator {
         while (state.attempt < state.maxAttempts) {
           state.attempt += 1;
           story.status = "DEVELOPING";
+          const implementationStartedAt = Date.now();
 
           await this.changeStatus(state, "DEVELOPING");
 
@@ -449,7 +510,9 @@ export class Orchestrator {
             message: `Developer iniciou a tentativa ${state.attempt}.`,
             storyId: story.id,
             metadata: {
-              attempt: state.attempt
+              attempt: state.attempt,
+              stage: "DEVELOPMENT",
+              executionPolicy: this.policyFor(state, "DEV")
             }
           });
 
@@ -471,6 +534,9 @@ export class Orchestrator {
             storyId: story.id,
             metadata: {
               attempt: state.attempt,
+              stage: "DEVELOPMENT",
+              durationMs: Date.now() - implementationStartedAt,
+              executionPolicy: this.policyFor(state, "DEV"),
               changedFiles: implementation.changedFiles,
               requestedCommands: implementation.commands,
               decisions: implementation.decisions
@@ -500,12 +566,12 @@ export class Orchestrator {
                 ? "Build concluído."
                 : "Build falhou.",
             storyId: story.id,
-            metadata: {
+            metadata: this.environmentMetadata(environment, "BUILD", {
               exitCode: build.exitCode,
               durationMs: build.durationMs,
               timedOut: build.timedOut,
               stderr: build.stderr.slice(0, 2_000)
-            }
+            })
           });
 
           const tests = await this.dependencies.runner.run({
@@ -525,16 +591,17 @@ export class Orchestrator {
                 ? "Testes automatizados aprovados."
                 : "Testes automatizados falharam.",
             storyId: story.id,
-            metadata: {
+            metadata: this.environmentMetadata(environment, "TEST", {
               exitCode: tests.exitCode,
               durationMs: tests.durationMs,
               timedOut: tests.timedOut,
               stderr: tests.stderr.slice(0, 2_000)
-            }
+            })
           });
 
           story.status = "TESTING";
           await this.changeStatus(state, "TESTING");
+          const validationStartedAt = Date.now();
 
           await this.recordEvent(state, {
             actor: "QA",
@@ -542,7 +609,9 @@ export class Orchestrator {
             message: `QA iniciou a validação da ${story.id}.`,
             storyId: story.id,
             metadata: {
-              attempt: state.attempt
+              attempt: state.attempt,
+              stage: "VALIDATION",
+              executionPolicy: this.policyFor(state, "QA")
             }
           });
 
@@ -566,6 +635,9 @@ export class Orchestrator {
               storyId: story.id,
               metadata: {
                 attempt: state.attempt,
+                stage: "VALIDATION",
+                durationMs: Date.now() - validationStartedAt,
+                executionPolicy: this.policyFor(state, "QA"),
                 summary: qaResult.summary,
                 criteria: qaResult.criteria,
                 decisions: qaResult.decisions
@@ -585,6 +657,9 @@ export class Orchestrator {
             storyId: story.id,
             metadata: {
               attempt: state.attempt,
+              stage: "VALIDATION",
+              durationMs: Date.now() - validationStartedAt,
+              executionPolicy: this.policyFor(state, "QA"),
               summary: qaResult.summary,
               criteria: qaResult.criteria,
               requestedChanges: qaResult.requestedChanges,
@@ -639,6 +714,8 @@ export class Orchestrator {
       return state;
     } finally {
       if (environment) {
+        const disposalStartedAt = Date.now();
+
         try {
           await this.dependencies.runner.dispose(state.workspacePath);
 
@@ -646,11 +723,9 @@ export class Orchestrator {
             actor: "RUNNER",
             action: "EXECUTION_ENVIRONMENT_DISPOSED",
             message: `Ambiente ${environment.backend} removido após a execução.`,
-            metadata: {
-              backend: environment.backend,
-              environmentId: environment.environmentId,
-              image: environment.image ?? null
-            }
+            metadata: this.environmentMetadata(environment, "CLEANUP", {
+              durationMs: Date.now() - disposalStartedAt
+            })
           });
         } catch (error) {
           state.status = "FAILED";
@@ -659,15 +734,15 @@ export class Orchestrator {
           await this.recordEvent(state, {
             actor: "RUNNER",
             action: "EXECUTION_ENVIRONMENT_CLEANUP_FAILED",
-            message: "Falha ao remover o ambiente de execução.",
-            metadata: {
-              backend: environment.backend,
-              environmentId: environment.environmentId,
+            message: "Falha ao remover o ambiente de execução. A run pode ser retomada.",
+            metadata: this.environmentMetadata(environment, "CLEANUP", {
+              durationMs: Date.now() - disposalStartedAt,
+              retryable: true,
               errorType:
                 error instanceof Error
                   ? error.constructor.name
                   : "UnknownError"
-            }
+            })
           });
         }
       }
@@ -757,11 +832,15 @@ export class Orchestrator {
     });
   }
 
-  private async installDependencies(state: RunState): Promise<void> {
+  private async installDependencies(
+    state: RunState,
+    environment: ExecutionEnvironment
+  ): Promise<void> {
     await this.recordEvent(state, {
       actor: "RUNNER",
       action: "DEPENDENCY_INSTALL_STARTED",
-      message: "Instalação das dependências iniciada."
+      message: "Instalação das dependências iniciada.",
+      metadata: this.environmentMetadata(environment, "INSTALL")
     });
 
     const installation = await this.dependencies.runner.run({
@@ -780,12 +859,12 @@ export class Orchestrator {
         installation.exitCode === 0
           ? "Dependências instaladas."
           : "Falha ao instalar dependências.",
-      metadata: {
+      metadata: this.environmentMetadata(environment, "INSTALL", {
         exitCode: installation.exitCode,
         durationMs: installation.durationMs,
         timedOut: installation.timedOut,
         stderr: installation.stderr.slice(0, 2_000)
-      }
+      })
     });
 
     if (installation.exitCode !== 0 || installation.timedOut) {
@@ -808,6 +887,33 @@ export class Orchestrator {
     return state.modelAssignments.find(
       (assignment) => assignment.agent === agent
     );
+  }
+
+  private policyFor(
+    state: RunState,
+    actor: "PO" | "DEV" | "QA" | "RUNNER"
+  ) {
+    return state.executionPolicies.find(
+      (policy) => policy.actor === actor
+    );
+  }
+
+  private environmentMetadata(
+    environment: ExecutionEnvironment,
+    stage: string,
+    additional: Record<string, unknown> = {}
+  ): Record<string, unknown> {
+    return {
+      backend: environment.backend,
+      environmentId: environment.environmentId,
+      image: environment.image ?? null,
+      imageDigest: environment.imageDigest ?? null,
+      stage,
+      limits: this.dependencies.runner.policy.limits,
+      networkAccess:
+        this.dependencies.runner.policy.networkAccess,
+      ...additional
+    };
   }
 
   private async persistState(state: RunState): Promise<void> {

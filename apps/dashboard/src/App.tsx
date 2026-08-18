@@ -46,6 +46,7 @@ function App() {
   const [configuration, setConfiguration] =
     useState<SquadConfiguration | null>(null);
   const [actorFilter, setActorFilter] = useState("ALL");
+  const [eventTypeFilter, setEventTypeFilter] = useState("ALL");
   const [timelineSearch, setTimelineSearch] = useState("");
   const [documents, setDocuments] = useState<ProjectDocument[]>([]);
   const [selectedDocumentId, setSelectedDocumentId] = useState("");
@@ -265,14 +266,21 @@ function App() {
   const filteredEvents = events.filter((event) => {
     const matchesActor =
       actorFilter === "ALL" || event.actor === actorFilter;
+    const matchesType =
+      eventTypeFilter === "ALL" ||
+      (eventTypeFilter === "INFRASTRUCTURE" &&
+        isInfrastructureEvent(event));
     const query = timelineSearch.trim().toLocaleLowerCase();
     const matchesSearch =
       query === "" ||
       event.message.toLocaleLowerCase().includes(query) ||
       event.action.toLocaleLowerCase().includes(query) ||
-      event.storyId?.toLocaleLowerCase().includes(query) === true;
+      event.storyId?.toLocaleLowerCase().includes(query) === true ||
+      JSON.stringify(event.metadata ?? {})
+        .toLocaleLowerCase()
+        .includes(query);
 
-    return matchesActor && matchesSearch;
+    return matchesActor && matchesType && matchesSearch;
   });
   const selectedDocument = documents.find(
     (document) => document.id === selectedDocumentId
@@ -280,10 +288,20 @@ function App() {
   const selectedRunSummary = runHistory.find(
     (item) => item.runId === runId
   );
+  const retryableInfrastructureFailure =
+    run?.status === "FAILED" &&
+    events.some(
+      (event) =>
+        event.actor === "RUNNER" &&
+        event.metadata?.retryable === true
+    );
   const canResume =
     run !== null &&
-    !terminalStatuses.includes(run.status) &&
+    (!terminalStatuses.includes(run.status) ||
+      retryableInfrastructureFailure) &&
     selectedRunSummary?.active === false;
+  const environmentDetails = getEnvironmentDetails(events);
+  const executionPolicies = run?.executionPolicies ?? [];
 
   return (
     <main className="dashboard">
@@ -388,6 +406,64 @@ function App() {
         />
       </section>
 
+      <section className="panel execution-panel">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">INFRAESTRUTURA</span>
+            <h2>Ambientes e políticas da execução</h2>
+          </div>
+
+          <span>
+            {environmentDetails?.backend
+              ? formatBackend(environmentDetails.backend)
+              : "Aguardando ambiente"}
+          </span>
+        </div>
+
+        {!run || executionPolicies.length === 0 ? (
+          <EmptyState text="As políticas aparecerão ao criar uma execução." />
+        ) : (
+          <div className="execution-policies">
+            {executionPolicies.map((policy) => (
+              <article key={policy.actor} className="execution-policy">
+                <div className="execution-policy-header">
+                  <strong>{policy.actor}</strong>
+                  <span>{formatRuntime(policy.runtime)}</span>
+                </div>
+
+                <dl>
+                  <div>
+                    <dt>Workspace</dt>
+                    <dd>{formatPolicyValue(policy.workspaceAccess)}</dd>
+                  </div>
+                  <div>
+                    <dt>Rede</dt>
+                    <dd>{formatPolicyValue(policy.networkAccess)}</dd>
+                  </div>
+                  <div>
+                    <dt>Credencial</dt>
+                    <dd>{formatPolicyValue(policy.credentialAccess)}</dd>
+                  </div>
+                  <div>
+                    <dt>Limites</dt>
+                    <dd>{formatLimits(policy.limits)}</dd>
+                  </div>
+                </dl>
+
+                {policy.actor === "RUNNER" && environmentDetails && (
+                  <div className="environment-provenance">
+                    <span>Imagem</span>
+                    <code>{environmentDetails.image ?? "não aplicável"}</code>
+                    <span>Digest</span>
+                    <code>{environmentDetails.imageDigest ?? "não aplicável"}</code>
+                  </div>
+                )}
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+
       <div className="content-grid">
         <section className="panel">
           <div className="section-heading">
@@ -459,6 +535,17 @@ function App() {
                 <option value="ORCHESTRATOR">Orquestrador</option>
                 <option value="RUNNER">Runner</option>
                 <option value="CLIENT">Cliente</option>
+              </select>
+            </label>
+
+            <label>
+              <span>Tipo</span>
+              <select
+                value={eventTypeFilter}
+                onChange={(event) => setEventTypeFilter(event.target.value)}
+              >
+                <option value="ALL">Todos</option>
+                <option value="INFRASTRUCTURE">Infraestrutura</option>
               </select>
             </label>
 
@@ -601,6 +688,36 @@ function App() {
                 </div>
               </dl>
 
+              {artifact.environmentProvenance && (
+                <div className="artifact-provenance">
+                  <div>
+                    <span>Proveniência do ambiente</span>
+                    <strong>
+                      {formatBackend(
+                        artifact.environmentProvenance.backend ?? "unknown"
+                      )}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Imagem</span>
+                    <code>
+                      {artifact.environmentProvenance.image ?? "não aplicável"}
+                    </code>
+                  </div>
+                  <div>
+                    <span>Digest</span>
+                    <code>
+                      {artifact.environmentProvenance.imageDigest ??
+                        "não aplicável"}
+                    </code>
+                  </div>
+                  <p>
+                    {artifact.environmentProvenance.reason ??
+                      "Backend registrado pela auditoria da run."}
+                  </p>
+                </div>
+              )}
+
               <div className="artifact-actions">
                 {artifact.hasPreview && artifact.previewUrl && (
                   <a
@@ -689,6 +806,91 @@ function formatModel(
   return configuration.llmModel
     ? `${configuration.llmProvider} · ${configuration.llmModel}`
     : `${configuration.llmProvider} · modelo padrão`;
+}
+
+interface EnvironmentDetails {
+  backend: string | null;
+  image: string | null;
+  imageDigest: string | null;
+}
+
+function getEnvironmentDetails(
+  events: AuditEvent[]
+): EnvironmentDetails | null {
+  const event = [...events].reverse().find(
+    (candidate) =>
+      isInfrastructureEvent(candidate) &&
+      typeof candidate.metadata?.backend === "string"
+  );
+
+  if (!event?.metadata) {
+    return null;
+  }
+
+  return {
+    backend:
+      typeof event.metadata.backend === "string"
+        ? event.metadata.backend
+        : null,
+    image:
+      typeof event.metadata.image === "string"
+        ? event.metadata.image
+        : null,
+    imageDigest:
+      typeof event.metadata.imageDigest === "string"
+        ? event.metadata.imageDigest
+        : null
+  };
+}
+
+function isInfrastructureEvent(event: AuditEvent): boolean {
+  return (
+    event.action.startsWith("EXECUTION_") ||
+    event.action.startsWith("DEPENDENCY_") ||
+    event.action.startsWith("BUILD_") ||
+    event.action.startsWith("TESTS_")
+  );
+}
+
+function formatRuntime(runtime: string): string {
+  const labels: Record<string, string> = {
+    "host-codex": "Codex host",
+    "local-process": "Local",
+    "docker-container": "Docker",
+    microvm: "microVM"
+  };
+
+  return labels[runtime] ?? runtime;
+}
+
+function formatBackend(backend: string): string {
+  const labels: Record<string, string> = {
+    local: "Local",
+    docker: "Docker",
+    microvm: "microVM"
+  };
+
+  return labels[backend] ?? backend;
+}
+
+function formatPolicyValue(value: string): string {
+  return value.replaceAll("-", " ");
+}
+
+function formatLimits(limits: {
+  timeoutMs: number;
+  cpu: number | null;
+  memory: string | null;
+  pids: number | null;
+}): string {
+  const resources = [
+    `${Math.round(limits.timeoutMs / 1_000)}s`,
+    limits.cpu === null ? null : `${limits.cpu} CPU`,
+    limits.memory,
+    limits.pids === null ? null : `${limits.pids} PIDs`
+  ].filter((value): value is string => value !== null);
+
+  return resources.join(" · ");
 }
 
 function StatusBadge(props: { status: string }) {
