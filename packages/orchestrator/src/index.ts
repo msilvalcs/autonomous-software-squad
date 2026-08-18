@@ -18,7 +18,7 @@ import type {
 import { QaResultSchema } from "@squad/schemas";
 
 import type {
-  LocalRunner,
+  ExecutionRunner,
   WorkspaceManager
 } from "@squad/runner";
 
@@ -27,7 +27,7 @@ export interface OrchestratorDependencies {
   developer: DeveloperAgent;
   qa: QualityAssuranceAgent;
   eventStore: JsonlEventStore;
-  runner: Pick<LocalRunner, "run">;
+  runner: Pick<ExecutionRunner, "run">;
   workspaceManager: Pick<
     WorkspaceManager,
     "prepareWorkspace"

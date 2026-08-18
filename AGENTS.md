@@ -23,7 +23,7 @@ Antes de modificar o projeto, considere:
 - a API limita o MVP a uma execução ativa por processo;
 - a publicação de GitHub Issues é opcional, controlada pelo Orquestrador e não
   expõe o token às personas;
-- Docker não faz parte do caminho principal do MVP.
+- o backend Docker é opcional e o LocalRunner permanece como padrão do MVP;
 
 Não descreva uma funcionalidade planejada como já implementada.
 

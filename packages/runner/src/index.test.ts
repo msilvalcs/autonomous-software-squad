@@ -1,5 +1,6 @@
 import {
   access,
+  chmod,
   mkdir,
   mkdtemp,
   readFile,
@@ -12,6 +13,8 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  createExecutionRunner,
+  DockerRunner,
   LocalRunner,
   WorkspaceManager,
   type AllowedCommand
@@ -120,6 +123,127 @@ describe("LocalRunner", () => {
     ).rejects.toThrow(
       "timeoutMs must be greater than zero"
     );
+  });
+});
+
+describe("DockerRunner", () => {
+  it("monta uma execução isolada com limites explícitos", async () => {
+    const { baseDirectory, workspace } =
+      await createWorkspace();
+    const fakeDocker = path.join(baseDirectory, "fake-docker.mjs");
+
+    await writeFile(
+      fakeDocker,
+      [
+        "#!/usr/bin/env node",
+        "console.log(JSON.stringify(process.argv.slice(2)));"
+      ].join("\n"),
+      "utf8"
+    );
+    await chmod(fakeDocker, 0o755);
+
+    const runner = new DockerRunner({
+      baseDirectory,
+      dockerBinary: fakeDocker,
+      image: "squad-runner:test"
+    });
+
+    const result = await runner.run({
+      workspace,
+      command: "npm run build",
+      timeoutMs: 10_000
+    });
+    const args = JSON.parse(result.stdout) as string[];
+
+    expect(result.exitCode).toBe(0);
+    expect(args).toContain("--read-only");
+    expect(args).toContain("no-new-privileges");
+    expect(args).toContain("ALL");
+    expect(args).toContain("--memory");
+    expect(args).toContain("--cpus");
+    expect(args).toContain("--pids-limit");
+    expect(args).toContain("none");
+    expect(args).toContain("squad-runner:test");
+    expect(args.slice(-3)).toEqual(["npm", "run", "build"]);
+  });
+
+  it("libera rede somente para instalação de dependências", async () => {
+    const { baseDirectory, workspace } =
+      await createWorkspace();
+    const fakeDocker = path.join(baseDirectory, "fake-docker.mjs");
+
+    await writeFile(
+      fakeDocker,
+      [
+        "#!/usr/bin/env node",
+        "console.log(JSON.stringify(process.argv.slice(2)));"
+      ].join("\n"),
+      "utf8"
+    );
+    await chmod(fakeDocker, 0o755);
+
+    const runner = new DockerRunner({
+      baseDirectory,
+      dockerBinary: fakeDocker,
+      installNetwork: "registry-egress"
+    });
+
+    const result = await runner.run({
+      workspace,
+      command: "npm install",
+      timeoutMs: 10_000
+    });
+    const args = JSON.parse(result.stdout) as string[];
+    const networkIndex = args.indexOf("--network");
+
+    expect(args[networkIndex + 1]).toBe("registry-egress");
+  });
+
+  it("rejeita workspace fora da pasta permitida", async () => {
+    const { baseDirectory } = await createWorkspace();
+    const runner = new DockerRunner({ baseDirectory });
+
+    await expect(
+      runner.run({
+        workspace: path.join(baseDirectory, "..", "outside"),
+        command: "npm test",
+        timeoutMs: 10_000
+      })
+    ).rejects.toThrow(
+      "Workspace is outside the allowed directory"
+    );
+  });
+});
+
+describe("createExecutionRunner", () => {
+  it("seleciona LocalRunner por padrão", async () => {
+    const { baseDirectory } = await createWorkspace();
+
+    expect(
+      createExecutionRunner({ baseDirectory }).backend
+    ).toBe("local");
+  });
+
+  it("seleciona DockerRunner explicitamente", async () => {
+    const { baseDirectory } = await createWorkspace();
+
+    expect(
+      createExecutionRunner({
+        mode: "docker",
+        baseDirectory
+      }).backend
+    ).toBe("docker");
+  });
+
+  it("falha para modo desconhecido sem fallback silencioso", async () => {
+    const { baseDirectory } = await createWorkspace();
+
+    expect(() =>
+      createExecutionRunner({
+        mode: "virtual-machine",
+        baseDirectory
+      })
+    ).toThrow("Unsupported execution mode");
   });
 });
 

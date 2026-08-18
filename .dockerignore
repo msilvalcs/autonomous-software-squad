@@ -1,0 +1,10 @@
+.git
+.github
+.agents
+data
+dist
+generated-projects
+node_modules
+templates
+*.log
+.env

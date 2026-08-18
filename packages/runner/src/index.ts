@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   cp,
   mkdir,
@@ -28,6 +29,13 @@ export interface ExecutionResult {
   timedOut: boolean;
 }
 
+export type ExecutionBackend = "local" | "docker";
+
+export interface ExecutionRunner {
+  readonly backend: ExecutionBackend;
+  run(request: ExecutionRequest): Promise<ExecutionResult>;
+}
+
 const commandArguments: Record<AllowedCommand, string[]> = {
   "npm install": ["install"],
   "npm test": ["test"],
@@ -35,7 +43,8 @@ const commandArguments: Record<AllowedCommand, string[]> = {
   "npm run typecheck": ["run", "typecheck"]
 };
 
-export class LocalRunner {
+export class LocalRunner implements ExecutionRunner {
+  readonly backend = "local" as const;
   private readonly baseDirectory: string;
 
   constructor(baseDirectory: string) {
@@ -136,6 +145,250 @@ export class LocalRunner {
 
     return resolvedWorkspace;
   }
+}
+
+export interface DockerRunnerOptions {
+  baseDirectory: string;
+  image?: string;
+  dockerBinary?: string;
+  cpuLimit?: number;
+  memoryLimit?: string;
+  pidsLimit?: number;
+  installNetwork?: string;
+}
+
+export class DockerRunner implements ExecutionRunner {
+  readonly backend = "docker" as const;
+  private readonly baseDirectory: string;
+  private readonly image: string;
+  private readonly dockerBinary: string;
+  private readonly cpuLimit: number;
+  private readonly memoryLimit: string;
+  private readonly pidsLimit: number;
+  private readonly installNetwork: string;
+
+  constructor(options: DockerRunnerOptions) {
+    this.baseDirectory = path.resolve(options.baseDirectory);
+    this.image = options.image ?? "autonomous-squad-runner:local";
+    this.dockerBinary = options.dockerBinary ?? "docker";
+    this.cpuLimit = options.cpuLimit ?? 1;
+    this.memoryLimit = options.memoryLimit ?? "1g";
+    this.pidsLimit = options.pidsLimit ?? 256;
+    this.installNetwork = options.installNetwork ?? "bridge";
+
+    if (!Number.isFinite(this.cpuLimit) || this.cpuLimit <= 0) {
+      throw new Error("Docker CPU limit must be greater than zero");
+    }
+
+    if (!Number.isInteger(this.pidsLimit) || this.pidsLimit <= 0) {
+      throw new Error("Docker PIDs limit must be a positive integer");
+    }
+
+    if (this.image.trim() === "" || this.memoryLimit.trim() === "") {
+      throw new Error("Docker image and memory limit are required");
+    }
+  }
+
+  async run(
+    request: ExecutionRequest
+  ): Promise<ExecutionResult> {
+    const workspace = resolveAllowedWorkspace(
+      this.baseDirectory,
+      request.workspace
+    );
+    const command = commandArguments[request.command];
+
+    if (!command) {
+      throw new Error("Command is not allowed");
+    }
+
+    if (
+      !Number.isFinite(request.timeoutMs) ||
+      request.timeoutMs <= 0
+    ) {
+      throw new Error("timeoutMs must be greater than zero");
+    }
+
+    const containerName = createContainerName(workspace);
+    const userId = process.getuid?.() ?? 1000;
+    const groupId = process.getgid?.() ?? 1000;
+    const network =
+      request.command === "npm install"
+        ? this.installNetwork
+        : "none";
+
+    const args = [
+      "run",
+      "--rm",
+      "--name",
+      containerName,
+      "--workdir",
+      "/workspace",
+      "--mount",
+      `type=bind,source=${workspace},target=/workspace`,
+      "--user",
+      `${userId}:${groupId}`,
+      "--read-only",
+      "--tmpfs",
+      "/tmp:rw,noexec,nosuid,size=268435456",
+      "--cap-drop",
+      "ALL",
+      "--security-opt",
+      "no-new-privileges",
+      "--pids-limit",
+      String(this.pidsLimit),
+      "--memory",
+      this.memoryLimit,
+      "--cpus",
+      String(this.cpuLimit),
+      "--network",
+      network,
+      "--env",
+      "CI=true",
+      "--env",
+      "HOME=/tmp",
+      "--env",
+      "NPM_CONFIG_CACHE=/tmp/.npm",
+      this.image,
+      "npm",
+      ...command
+    ];
+
+    const startedAt = Date.now();
+
+    return new Promise((resolve, reject) => {
+      let stdout = "";
+      let stderr = "";
+      let timedOut = false;
+      let settled = false;
+      let timeoutCleanup: Promise<void> | undefined;
+
+      const child = spawn(this.dockerBinary, args, {
+        cwd: workspace,
+        shell: false,
+        env: {
+          ...process.env,
+          CI: "true"
+        }
+      });
+
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        timeoutCleanup = removeContainer(
+          this.dockerBinary,
+          containerName
+        );
+        child.kill("SIGTERM");
+      }, request.timeoutMs);
+
+      child.stdout.on("data", (chunk: Buffer) => {
+        stdout += chunk.toString();
+      });
+
+      child.stderr.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString();
+      });
+
+      child.on("error", (error) => {
+        clearTimeout(timeout);
+
+        if (!settled) {
+          settled = true;
+          reject(error);
+        }
+      });
+
+      child.on("close", async (exitCode) => {
+        clearTimeout(timeout);
+
+        if (!settled) {
+          settled = true;
+          await timeoutCleanup;
+
+          resolve({
+            command: request.command,
+            exitCode,
+            stdout,
+            stderr,
+            durationMs: Date.now() - startedAt,
+            timedOut
+          });
+        }
+      });
+    });
+  }
+}
+
+export interface CreateExecutionRunnerOptions {
+  mode?: string;
+  baseDirectory: string;
+  docker?: Omit<DockerRunnerOptions, "baseDirectory">;
+}
+
+export function createExecutionRunner(
+  options: CreateExecutionRunnerOptions
+): ExecutionRunner {
+  const mode = options.mode ?? "local";
+
+  if (mode === "local") {
+    return new LocalRunner(options.baseDirectory);
+  }
+
+  if (mode === "docker") {
+    return new DockerRunner({
+      ...options.docker,
+      baseDirectory: options.baseDirectory
+    });
+  }
+
+  throw new Error(
+    `Unsupported execution mode: ${mode}. Expected local or docker.`
+  );
+}
+
+function resolveAllowedWorkspace(
+  baseDirectory: string,
+  workspace: string
+): string {
+  const resolvedWorkspace = path.resolve(workspace);
+  const relativePath = path.relative(baseDirectory, resolvedWorkspace);
+
+  if (
+    relativePath.startsWith("..") ||
+    path.isAbsolute(relativePath)
+  ) {
+    throw new Error("Workspace is outside the allowed directory");
+  }
+
+  return resolvedWorkspace;
+}
+
+function createContainerName(workspace: string): string {
+  const workspaceName = path.basename(workspace)
+    .toLowerCase()
+    .replace(/[^a-z0-9_.-]/g, "-")
+    .slice(0, 40);
+
+  return `squad-${workspaceName}-${randomUUID().slice(0, 8)}`;
+}
+
+async function removeContainer(
+  dockerBinary: string,
+  containerName: string
+): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const cleanup = spawn(
+      dockerBinary,
+      ["rm", "--force", containerName],
+      {
+        shell: false,
+        stdio: "ignore"
+      }
+    );
+
+    cleanup.on("error", () => resolve());
+    cleanup.on("close", () => resolve());
+  });
 }
 
 export class WorkspaceManager {

@@ -22,7 +22,7 @@ O projeto foi concebido para a **Trilha B — Squad Autônomo de Agentes** do Ha
 | Integração contínua | Funcional | Typecheck, testes e build no GitHub Actions |
 | Histórico e retomada | Funcional | Seleção persistida e continuação auditável |
 | GitHub Issues | Opcional | Stories publicadas com checklist e rastreabilidade |
-| Docker Runner | Planejado | Diferencial posterior ao MVP |
+| Docker Runner | Funcional e opcional | Isola comandos npm sem substituir o fluxo local |
 
 > PO, Developer e QA podem operar com Codex. O Developer altera somente a cópia isolada da aplicação, enquanto o QA inspeciona o resultado em modo somente leitura. Os mocks permanecem intencionalmente disponíveis como fallback de demonstração.
 
@@ -369,7 +369,35 @@ npm test
 npm run typecheck
 ```
 
-O Docker não é requisito do produto atual. Um `DockerRunner` poderá ser criado posteriormente atrás da mesma abstração, sem reconstruir o orquestrador.
+O Docker não é requisito para usar o produto. O contrato `ExecutionRunner`
+permite selecionar `LocalRunner` ou `DockerRunner` sem reconstruir o
+Orquestrador.
+
+Para preparar a imagem reproduzível:
+
+```bash
+docker build \
+  --file docker/runner.Dockerfile \
+  --tag autonomous-squad-runner:local \
+  .
+```
+
+Depois configure:
+
+```env
+EXECUTION_MODE=docker
+DOCKER_RUNNER_IMAGE=autonomous-squad-runner:local
+```
+
+O DockerRunner monta somente o workspace validado, executa sem root, remove
+capabilities, impede novos privilégios, aplica limites de CPU, memória e PIDs e
+usa root filesystem somente leitura. Build, typecheck e testes ficam sem rede;
+somente `npm install` recebe a rede configurada. O Docker socket nunca é
+montado dentro do container.
+
+Esta etapa isola os comandos npm. O Codex Developer ainda é executado no host;
+containers por persona e microVMs permanecem como evoluções documentadas em
+`docs/decisions/ADR-007-execution-isolation.md`.
 
 ## Qualidade
 
@@ -408,7 +436,8 @@ Os testes cobrem atualmente:
 - o modo mock do Developer não modifica o produto conforme cada briefing;
 - o template inicial é uma aplicação React de tarefas;
 - a execução é sequencial;
-- o Local Runner oferece controle, mas não isolamento forte como um container;
+- o modo local oferece controle, mas não isolamento forte como o modo Docker;
+- o Docker Runner ainda não isola a execução do Codex Developer;
 - pacotes internos precisam ser recompilados quando seus arquivos `src` mudam;
 - JSONL é adequado ao MVP, mas não substitui um banco transacional em escala;
 - retomada automática no startup ainda não foi implementada;
@@ -421,8 +450,9 @@ Os testes cobrem atualmente:
 2. calibrar o roteamento com métricas de qualidade, latência e consumo;
 3. medir o efeito das skills em qualidade e consumo de contexto;
 4. melhorar o modo watch dos pacotes internos;
-5. criar `DockerRunner` opcional;
-6. adicionar autenticação e persistência em banco, caso o produto evolua.
+5. isolar as personas em ambientes com políticas próprias;
+6. avaliar microVM para execuções de alto risco;
+7. adicionar autenticação e persistência em banco, caso o produto evolua.
 
 ## Demonstração sugerida
 
@@ -446,7 +476,7 @@ Os testes cobrem atualmente:
 - Codex CLI permite usar autenticação do ChatGPT no ambiente local;
 - um template controlado reduz tempo, custo e variabilidade;
 - JSONL simplifica auditoria no MVP;
-- Docker permanece opcional até o fluxo principal estar estável.
+- Docker permanece opcional e selecionado somente na composição da API.
 
 ## Licença
 

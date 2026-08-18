@@ -24,7 +24,7 @@ import {
   type RoutingOverrides
 } from "@squad/orchestrator";
 import {
-  LocalRunner,
+  createExecutionRunner,
   WorkspaceManager
 } from "@squad/runner";
 
@@ -76,9 +76,15 @@ const workspaceManager = new WorkspaceManager({
   )
 });
 
-const runner = new LocalRunner(
-  generatedProjectsDirectory
-);
+const runner = createExecutionRunner({
+  mode: process.env.EXECUTION_MODE,
+  baseDirectory: generatedProjectsDirectory,
+  docker: {
+    image:
+      process.env.DOCKER_RUNNER_IMAGE ??
+      "autonomous-squad-runner:local"
+  }
+});
 
 const llmProvider = process.env.LLM_PROVIDER ?? "mock";
 const routingOverrides = parseRoutingOverrides(
@@ -212,6 +218,17 @@ const documentationFiles = [
       "docs",
       "decisions",
       "ADR-006-github-issues.md"
+    )
+  },
+  {
+    id: "execution-isolation",
+    title: "ADR-007: Isolamento de execução",
+    category: "Arquitetura",
+    path: path.join(
+      repositoryRoot,
+      "docs",
+      "decisions",
+      "ADR-007-execution-isolation.md"
     )
   },
   {

@@ -44,3 +44,19 @@ jobs:
 
       - name: Build workspaces
         run: npm run build
+
+  docker-image:
+    name: Build Docker Runner image
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Build pinned runner image
+        run: >-
+          docker build
+          --file docker/runner.Dockerfile
+          --tag autonomous-squad-runner:ci
+          .
