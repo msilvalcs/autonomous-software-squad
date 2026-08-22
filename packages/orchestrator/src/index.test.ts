@@ -556,6 +556,12 @@ describe("DeterministicModelRouter", () => {
 
     expect(result.complexity).toBe("HIGH");
     expect(
+      result.assignments.find((item) => item.agent === "DEV")
+    ).toMatchObject({
+      model: "gpt-5.6-luna",
+      reasoningEffort: "medium"
+    });
+    expect(
       result.assignments.find((item) => item.agent === "QA")
     ).toMatchObject({
       model: "gpt-5.6-sol",

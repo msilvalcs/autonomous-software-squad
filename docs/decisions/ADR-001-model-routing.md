@@ -28,7 +28,7 @@ Defaults executáveis no ambiente atual:
 |---|---|---|---|
 | LOW | Luna, low | Luna, medium | Luna, low |
 | MEDIUM | Terra, medium | Luna, medium | Terra, high |
-| HIGH | Sol, high | Sol, high | Sol, xhigh |
+| HIGH | Sol, high | Luna, medium | Sol, xhigh |
 
 Providers externos só podem ser usados depois de configurados no Codex CLI. O ambiente atual possui apenas o provider Codex autenticado pelo ChatGPT.
 

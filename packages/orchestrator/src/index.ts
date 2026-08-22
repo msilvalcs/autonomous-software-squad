@@ -233,8 +233,11 @@ function defaultRoute(
   if (complexity === "HIGH") {
     return {
       provider,
-      model: "gpt-5.6-sol",
-      reasoningEffort: agent === "QA" ? "xhigh" : "high"
+      model: agent === "DEV" ? "gpt-5.6-luna" : "gpt-5.6-sol",
+      reasoningEffort:
+        agent === "DEV"
+          ? "medium"
+          : "xhigh"
     };
   }
 

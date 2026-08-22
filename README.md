@@ -117,7 +117,7 @@ Defaults com o provider Codex:
 |---|---|---|---|
 | LOW | Luna, low | Luna, medium | Luna, low |
 | MEDIUM | Terra, medium | Luna, medium | Terra, high |
-| HIGH | Sol, high | Sol, high | Sol, xhigh |
+| HIGH | Sol, high | Luna, medium | Sol, xhigh |
 
 O evento `MODEL_ROUTING_DECIDED` registra a classificação, todas as rotas e a
 justificativa. Consulte `docs/decisions/ADR-001-model-routing.md`.
