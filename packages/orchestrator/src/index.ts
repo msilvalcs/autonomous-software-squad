@@ -223,7 +223,11 @@ function defaultRoute(
   }
 
   if (complexity === "LOW") {
-    return { provider, model: "gpt-5.6-luna", reasoningEffort: "low" };
+    return {
+      provider,
+      model: "gpt-5.6-luna",
+      reasoningEffort: agent === "DEV" ? "medium" : "low"
+    };
   }
 
   if (complexity === "HIGH") {

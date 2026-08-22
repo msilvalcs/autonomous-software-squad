@@ -115,7 +115,7 @@ Defaults com o provider Codex:
 
 | Complexidade | PO | Developer | QA |
 |---|---|---|---|
-| LOW | Luna, low | Luna, low | Luna, low |
+| LOW | Luna, low | Luna, medium | Luna, low |
 | MEDIUM | Terra, medium | Luna, medium | Terra, high |
 | HIGH | Sol, high | Sol, high | Sol, xhigh |
 
