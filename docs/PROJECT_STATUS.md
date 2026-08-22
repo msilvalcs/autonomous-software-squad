@@ -29,7 +29,7 @@ com preview, ZIP e evidência E2E no dashboard.
 | Auditoria | Funcional | Estado em JSON e eventos em JSONL, incluindo decisões e alternativas |
 | GitHub Issues | Funcional e opcional | Seis stories de isolamento publicadas e concluídas |
 | Runner local | Funcional | Allowlist, timeout, captura de evidências e workspace controlado |
-| Runner Docker | Funcional, em consolidação | Container efêmero, usuário sem root, rede controlada e limites de recursos |
+| Runner Docker | Funcional e validado | Container efêmero, usuário sem root, rede controlada, Chromium e limites de recursos |
 | Entrega | Funcional para runs concluídas | Preview, manifesto e download ZIP |
 | CI | Verde | Typecheck, testes, build da imagem Docker e integração Playwright |
 | MicroVM | Avaliada, não operacional | Gate fail-closed e critérios de adoção documentados no ADR-010 |
@@ -102,6 +102,12 @@ Como validação do caminho mock após a correção, a run
 `run-b002f0db-9b87-442e-a5fa-238b8e983e11` terminou em `COMPLETED`, com duas
 stories aprovadas na segunda tentativa. Isso confirma o ciclo simulado
 QA -> Developer -> Runner sem depender de Chromium no modo local.
+
+Como validação adicional do ambiente isolado, a run
+`run-2d1163f7-481b-48e1-a7a6-cadd40fe57ff` terminou em `COMPLETED` usando
+`EXECUTION_MODE=docker`. As duas stories foram aprovadas na segunda tentativa,
+e a auditoria registrou `EXECUTION_ENVIRONMENT_STARTED` e
+`EXECUTION_ENVIRONMENT_DISPOSED` para o container efêmero.
 
 ## Diagnóstico do bloqueio atual
 
