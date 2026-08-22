@@ -349,6 +349,8 @@ export function canResumeRun(
     (event) =>
       event.action === "ISOLATION_REQUIREMENT_NOT_MET" ||
       event.action === "IMPLEMENTATION_FAILED" ||
+      (event.action === "RUN_FAILED" &&
+        event.metadata?.retryable === true) ||
       event.action === "EXECUTION_ENVIRONMENT_CREATION_FAILED" ||
       event.action === "EXECUTION_ENVIRONMENT_CLEANUP_FAILED"
   );
@@ -357,11 +359,14 @@ export function canResumeRun(
     return false;
   }
 
-  if (latestFailure.action === "IMPLEMENTATION_FAILED") {
+  if (
+    latestFailure.action === "IMPLEMENTATION_FAILED" ||
+    latestFailure.metadata?.retryable === true
+  ) {
     return true;
   }
 
-  return latestFailure.metadata?.retryable === true;
+  return false;
 }
 
 export class Orchestrator {
@@ -883,15 +888,27 @@ export class Orchestrator {
       state.status = "FAILED";
       state.updatedAt = new Date().toISOString();
 
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : "Erro desconhecido durante a execução.";
+      const retryable = errorMessage.includes(
+        "Codex execution timed out"
+      );
+
       await this.dependencies.eventStore.saveState(state);
 
       await this.recordEvent(state, {
         actor: "ORCHESTRATOR",
         action: "RUN_FAILED",
-        message:
-          error instanceof Error
-            ? error.message
-            : "Erro desconhecido durante a execução."
+        message: errorMessage,
+        metadata: {
+          stage: currentStage,
+          currentStoryId: state.currentStoryId,
+          attempt: state.attempt,
+          retryable,
+          errorType: retryable ? "CODEX_TIMEOUT" : "UNEXPECTED_ERROR"
+        }
       });
 
       return state;

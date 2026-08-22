@@ -354,6 +354,37 @@ describe("Orchestrator", () => {
     expect(canResumeRun(state, events)).toBe(false);
   });
 
+  it("permite retomar timeout do Codex enquanto há tentativa restante", () => {
+    const state = {
+      runId: "run-timeout",
+      briefing: "Criar uma aplicação para controle de tarefas.",
+      status: "FAILED" as const,
+      currentStoryId: "US-003",
+      attempt: 2,
+      maxAttempts: 3,
+      complexity: "MEDIUM" as const,
+      modelAssignments: [],
+      executionPolicies: [],
+      stories: [],
+      workspacePath: "/tmp/run-timeout",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    const events = [{
+      eventId: "evt-timeout",
+      runId: state.runId,
+      timestamp: new Date().toISOString(),
+      actor: "ORCHESTRATOR" as const,
+      action: "RUN_FAILED" as const,
+      message: "Codex execution timed out.",
+      metadata: { retryable: true, errorType: "CODEX_TIMEOUT" }
+    }] satisfies AuditEvent[];
+
+    expect(canResumeRun(state, events)).toBe(true);
+    state.attempt = 3;
+    expect(canResumeRun(state, events)).toBe(false);
+  });
+
   it("não permite retomar violação do isolamento mínimo", async () => {
     const { orchestrator } = await createOrchestrator();
     const state = await orchestrator.createRun({

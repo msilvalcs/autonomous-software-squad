@@ -98,6 +98,16 @@ O limite de tentativas foi atingido. Por segurança, essa run não pode ser
 retomada novamente. O workspace e a auditoria permanecem disponíveis para
 diagnóstico, mas a comprovação final deve ocorrer em uma nova run.
 
+Uma execução posterior (
+un-bb023a78-3d96-4697-ab9a-a737ad2ebafe) revelou
+que o Codex Developer pode exceder o timeout de 10 minutos ao processar uma
+correção de QA. O evento foi registrado como RUN_FAILED, mas versões
+anteriores não marcavam esse tipo de falha como retomável. O Orquestrador agora
+classifica novos timeouts como CODEX_TIMEOUT com
+etryable: true, permitindo
+retomada enquanto ainda houver tentativa disponível. O run histórico não foi
+alterado, preservando a auditoria; ele deve ser substituído por uma nova run.
+
 Como validação do caminho mock após a correção, a run
 `run-b002f0db-9b87-442e-a5fa-238b8e983e11` terminou em `COMPLETED`, com duas
 stories aprovadas na segunda tentativa. Isso confirma o ciclo simulado
