@@ -1,6 +1,6 @@
 # Estado do projeto e próximos passos
 
-Atualizado em: 18 de agosto de 2026
+Atualizado em: 22 de agosto de 2026
 
 ## Resumo executivo
 
@@ -9,15 +9,14 @@ Hackathon Reply. O sistema recebe um briefing, cria stories, direciona Product
 Owner, Developer e QA, executa build e testes, persiste decisões e eventos e
 apresenta o progresso em tempo real no dashboard.
 
-A base publicada no GitHub está em `main`, no commit `a64989f`, com as seis
-issues da fase de isolamento concluídas. Existe, porém, um conjunto de mudanças
-locais ainda não publicado. Essas mudanças adicionam testes E2E com Playwright,
-melhoram a retomada de runs e tornam o botão principal do dashboard contextual
-ao estado da execução.
+A base publicada no GitHub está na branch
+`feat-cooperative-cancellation-and-antigravity`, no commit `ee7b94e`, com as
+seis issues da fase de isolamento concluídas. A branch já está sincronizada com
+o remoto e o CI está verde.
 
 O projeto está tecnicamente avançado, mas ainda não deve ser tratado como uma
-entrega final. O próximo marco é fechar o fluxo E2E em uma execução nova,
-versionar as mudanças locais e confirmar o pipeline no GitHub Actions.
+entrega final. O próximo marco é obter uma nova run Codex concluída em Docker,
+com preview, ZIP e evidência E2E no dashboard.
 
 ## Estado por área
 
@@ -32,7 +31,7 @@ versionar as mudanças locais e confirmar o pipeline no GitHub Actions.
 | Runner local | Funcional | Allowlist, timeout, captura de evidências e workspace controlado |
 | Runner Docker | Funcional, em consolidação | Container efêmero, usuário sem root, rede controlada e limites de recursos |
 | Entrega | Funcional para runs concluídas | Preview, manifesto e download ZIP |
-| CI | Funcional na versão publicada | Typecheck, testes e build; validação E2E Docker está alterada apenas localmente |
+| CI | Verde | Typecheck, testes, build da imagem Docker e integração Playwright |
 | MicroVM | Avaliada, não operacional | Gate fail-closed e critérios de adoção documentados no ADR-010 |
 
 ## O que já foi concluído
@@ -52,10 +51,9 @@ versionar as mudanças locais e confirmar o pipeline no GitHub Actions.
 - avaliação de Firecracker, Kata Containers e Docker endurecido;
 - seis issues do milestone de isolamento fechadas no GitHub.
 
-## Mudanças locais ainda não publicadas
+## Mudanças recentes publicadas
 
-O working tree possui alterações não commitadas sobre `a64989f`. O conjunto
-inclui:
+O commit `d7d5fe6`, seguido pelo ajuste de workflow `ee7b94e`, publicou:
 
 - Playwright no template React, com projetos de referência para 1280 x 800 e
   375 x 812;
@@ -70,11 +68,10 @@ inclui:
 - nova inscrição SSE quando uma run é retomada;
 - ADR-011 com as decisões de E2E, retomada e ações por estado.
 
-Essas mudanças passaram localmente por lint, typecheck, build e 64 testes do
-monorepo. O teste de integração Developer -> Runner Docker -> Playwright também
-foi aprovado com dois projetos de navegador e sem rede durante a execução. O
-conjunto ainda precisa ser commitado, enviado ao GitHub e confirmado no CI
-remoto.
+Essas mudanças passaram localmente por typecheck, build e 78 testes, com um
+teste Docker local condicional. No GitHub Actions, a execução
+`32546513744` passou nos jobs de verificação e de imagem Docker, incluindo a
+integração Developer -> Runner Docker -> Playwright.
 
 ## Última execução representativa
 
@@ -101,6 +98,11 @@ O limite de tentativas foi atingido. Por segurança, essa run não pode ser
 retomada novamente. O workspace e a auditoria permanecem disponíveis para
 diagnóstico, mas a comprovação final deve ocorrer em uma nova run.
 
+Como validação do caminho mock após a correção, a run
+`run-b002f0db-9b87-442e-a5fa-238b8e983e11` terminou em `COMPLETED`, com duas
+stories aprovadas na segunda tentativa. Isso confirma o ciclo simulado
+QA -> Developer -> Runner sem depender de Chromium no modo local.
+
 ## Diagnóstico do bloqueio atual
 
 Há uma diferença entre dois contextos de execução:
@@ -113,6 +115,10 @@ Assim, um teste E2E solicitado pelo Developer pode falhar no host por ausência
 do navegador antes de o Orquestrador encaminhar o mesmo comando ao Runner
 Docker. O problema atual é de fronteira e contrato entre Developer e Runner,
 não uma evidência de falha das cinco funcionalidades já aprovadas.
+
+Esse bloqueio foi corrigido no fluxo atual. O LocalRunner executa os testes
+unitários sem exigir Chromium; o DockerRunner define `RUN_E2E=true` e executa
+também os testes Playwright dentro da imagem provisionada.
 
 ## O que precisa ser feito
 
@@ -128,7 +134,7 @@ não uma evidência de falha das cinco funcionalidades já aprovadas.
 - [x] Revisar o diff local completo e corrigir divergências entre código,
   `AGENTS.md` e README.
 - [x] Executar novamente `npm run typecheck`, `npm run build` e `npm test`.
-- [ ] Criar commit sem credenciais, fazer push e acompanhar o GitHub Actions até
+- [x] Criar commit sem credenciais, fazer push e acompanhar o GitHub Actions até
   a conclusão.
 - [ ] Iniciar uma run nova com o briefing industrial e obter 6 de 6 stories
   aprovadas, preview e ZIP.
@@ -179,8 +185,8 @@ não uma evidência de falha das cinco funcionalidades já aprovadas.
 
 O marco seguinte estará concluído quando todos os itens abaixo forem verdadeiros:
 
-- [ ] mudanças locais versionadas e publicadas;
-- [ ] GitHub Actions aprovado, incluindo o job Docker com Playwright;
+- [x] mudanças versionadas e publicadas na branch de trabalho;
+- [x] GitHub Actions aprovado, incluindo o job Docker com Playwright;
 - [ ] nova run Codex termina em `COMPLETED`;
 - [ ] todas as stories ficam em `PASSED`;
 - [ ] preview e ZIP são gerados;
