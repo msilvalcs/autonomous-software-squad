@@ -5,7 +5,8 @@ export type RunStatus =
   | "TESTING"
   | "COMPLETED"
   | "BLOCKED"
-  | "FAILED";
+  | "FAILED"
+  | "CANCELLED";
 
 export type StoryStatus =
   | "PENDING"

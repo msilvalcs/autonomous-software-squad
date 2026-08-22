@@ -6,7 +6,8 @@ export interface RunAction {
     | "resume"
     | "completed"
     | "blocked"
-    | "failed";
+    | "failed"
+    | "cancelled";
   label: string;
   disabled: boolean;
 }
@@ -39,6 +40,22 @@ export function getRunAction(
     return {
       kind: "blocked",
       label: "Limite de tentativas atingido",
+      disabled: true
+    };
+  }
+
+  if (run.status === "CANCELLED") {
+    if (run.canResume) {
+      return {
+        kind: "resume",
+        label: "Retomar execução",
+        disabled: false
+      };
+    }
+
+    return {
+      kind: "cancelled",
+      label: "Execução cancelada",
       disabled: true
     };
   }

@@ -409,9 +409,11 @@ somente `npm install` recebe a rede configurada. O Docker socket nunca é
 montado dentro do container, e credenciais de LLM não são repassadas ao Runner.
 
 A imagem também contém Chromium Headless Shell fixado pela versão do Playwright.
-O template executa Vitest e Playwright por `npm test`, com projetos de 1280 px e
-375 px. O navegador usa apenas loopback, shared memory privada e permanece sem
-rede durante os testes. Consulte
+No LocalRunner, `npm test` executa os testes unitários para manter o modo
+mock/local reproduzível sem navegador. No DockerRunner, `RUN_E2E=true` faz o
+mesmo comando executar Vitest e Playwright, com projetos de 1280 px e 375 px.
+O navegador usa apenas loopback, shared memory privada e permanece sem rede
+durante os testes. Consulte
 `docs/decisions/ADR-011-e2e-recovery-actions.md`.
 
 Cada run prepara um único container, reutiliza esse ambiente nas tentativas e

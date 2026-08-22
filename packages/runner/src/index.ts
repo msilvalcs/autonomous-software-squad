@@ -22,6 +22,7 @@ export interface ExecutionRequest {
   workspace: string;
   command: AllowedCommand;
   timeoutMs: number;
+  signal?: AbortSignal;
 }
 
 export interface ExecutionResult {
@@ -511,7 +512,9 @@ export class DockerRunner implements ExecutionRunner {
       "--env",
       "NPM_CONFIG_CACHE=/tmp/.npm",
       "--env",
-      "PLAYWRIGHT_BROWSERS_PATH=/ms-playwright"
+      "PLAYWRIGHT_BROWSERS_PATH=/ms-playwright",
+      "--env",
+      "RUN_E2E=true"
     ];
   }
 
@@ -568,6 +571,8 @@ export class DockerRunner implements ExecutionRunner {
           "NPM_CONFIG_CACHE=/tmp/.npm",
           "--env",
           "PLAYWRIGHT_BROWSERS_PATH=/ms-playwright",
+          "--env",
+          "RUN_E2E=true",
           containerName,
           "npm",
           ...command

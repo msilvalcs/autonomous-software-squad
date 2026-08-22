@@ -20,8 +20,9 @@ deduzia essa condição varrendo eventos e ocultava o botão nos demais casos.
 - Provisionar `@playwright/test` 1.62.1 no template e Chromium Headless Shell
   na imagem Docker. O download acontece no build da imagem, nunca durante uma
   run.
-- Executar testes unitários e E2E por `npm test`. O Runner também reconhece
-  `npm run test:e2e` explicitamente.
+- Executar testes unitários por `npm test` no LocalRunner e, quando
+  `RUN_E2E=true`, executar também E2E no DockerRunner. O Runner também
+  reconhece `npm run test:e2e` explicitamente.
 - Fazer o Developer criar os testes e solicitar os comandos na saída
   estruturada, sem usar execuções dependentes do host como condição de falha.
   O Runner configurado para a run é a fonte de verdade para build e testes.

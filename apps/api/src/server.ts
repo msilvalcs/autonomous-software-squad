@@ -170,6 +170,7 @@ const app = Fastify({
 });
 
 const activeExecutions = new Map<string, Promise<void>>();
+const executionControllers = new Map<string, AbortController>();
 
 const documentationFiles = [
   {
@@ -413,6 +414,35 @@ app.post<{
   return reply.status(202).send({
     runId: state.runId,
     status: state.status
+  });
+});
+
+app.post<{
+  Params: {
+    runId: string;
+  };
+}>("/runs/:runId/cancel", async (request, reply) => {
+  const controller = executionControllers.get(request.params.runId);
+
+  if (!controller) {
+    const state = await eventStore.loadState(request.params.runId);
+
+    if (!state) {
+      return reply.status(404).send({ error: "Run not found" });
+    }
+
+    return reply.status(409).send({
+      error: "Run is not active",
+      status: state.status
+    });
+  }
+
+  controller.abort();
+
+  return reply.status(202).send({
+    ok: true,
+    runId: request.params.runId,
+    status: "CANCELLED"
   });
 });
 
@@ -911,10 +941,11 @@ function startExecution(
   state: RunState,
   resume: boolean
 ): void {
+  const controller = new AbortController();
   const execution = (
     resume
-      ? orchestrator.resume(state)
-      : orchestrator.execute(state)
+      ? orchestrator.resume(state, controller.signal)
+      : orchestrator.execute(state, controller.signal)
   )
     .then(() => undefined)
     .catch((error: unknown) => {
@@ -922,9 +953,11 @@ function startExecution(
     })
     .finally(() => {
       activeExecutions.delete(state.runId);
+      executionControllers.delete(state.runId);
     });
 
   activeExecutions.set(state.runId, execution);
+  executionControllers.set(state.runId, controller);
 }
 
 async function getCompletedArtifact(

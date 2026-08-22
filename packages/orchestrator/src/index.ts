@@ -320,6 +320,13 @@ export function canResumeRun(
     return false;
   }
 
+  if (state.status === "CANCELLED") {
+    return (
+      state.currentStoryId === null ||
+      state.attempt < state.maxAttempts
+    );
+  }
+
   if (state.status !== "FAILED") {
     return true;
   }
@@ -436,11 +443,17 @@ export class Orchestrator {
     return state;
   }
 
-  async execute(state: RunState): Promise<RunState> {
-    return this.run(state, false);
+  async execute(
+    state: RunState,
+    signal?: AbortSignal
+  ): Promise<RunState> {
+    return this.run(state, false, signal);
   }
 
-  async resume(state: RunState): Promise<RunState> {
+  async resume(
+    state: RunState,
+    signal?: AbortSignal
+  ): Promise<RunState> {
     const events = await this.dependencies.eventStore.listEvents(
       state.runId
     );
@@ -449,16 +462,26 @@ export class Orchestrator {
       throw new Error(`Run ${state.runId} cannot be resumed`);
     }
 
-    return this.run(state, true);
+    return this.run(state, true, signal);
   }
 
   private async run(
     state: RunState,
-    resuming: boolean
+    resuming: boolean,
+    signal?: AbortSignal
   ): Promise<RunState> {
     let environment: ExecutionEnvironment | undefined;
+    let currentStage = resuming ? "RESUME" : "PREPARE";
+
+    const checkCancelled = () => {
+      if (signal?.aborted) {
+        throw new Error("Run was cancelled");
+      }
+    };
 
     try {
+      checkCancelled();
+
       const isolation = this.isolationDecision(state.complexity);
 
       if (!isolation.allowed) {
@@ -533,10 +556,11 @@ export class Orchestrator {
             attempt: state.attempt
           }
         });
-
       }
 
       if (needsPlanning) {
+        currentStage = "PLANNING";
+        checkCancelled();
         await this.changeStatus(state, "PLANNING");
         const planningStartedAt = Date.now();
 
@@ -550,10 +574,12 @@ export class Orchestrator {
           }
         });
 
+        checkCancelled();
         const backlog = await this.dependencies.po.createBacklog(
           state.briefing,
           this.assignmentFor(state, "PO")
         );
+        checkCancelled();
         state.stories = backlog.stories;
 
         await this.recordEvent(state, {
@@ -570,10 +596,11 @@ export class Orchestrator {
         });
 
         await this.publishStories(state);
-
       }
 
       if (needsDependencyInstall) {
+        currentStage = "INSTALL";
+        checkCancelled();
         await this.installDependencies(state, environment);
       }
 
@@ -581,6 +608,8 @@ export class Orchestrator {
         if (story.status === "PASSED") {
           continue;
         }
+
+        checkCancelled();
 
         const resumesCurrentStory =
           resuming && state.currentStoryId === story.id;
@@ -603,8 +632,10 @@ export class Orchestrator {
         });
 
         while (state.attempt < state.maxAttempts) {
+          checkCancelled();
           state.attempt += 1;
           story.status = "DEVELOPING";
+          currentStage = "DEVELOPMENT";
           const implementationStartedAt = Date.now();
 
           await this.changeStatus(state, "DEVELOPING");
@@ -621,6 +652,7 @@ export class Orchestrator {
             }
           });
 
+          checkCancelled();
           const implementation =
             await this.dependencies.developer.implement({
               story,
@@ -628,6 +660,7 @@ export class Orchestrator {
               workspacePath: state.workspacePath,
               assignment: this.assignmentFor(state, "DEV")
             });
+          checkCancelled();
 
           await this.recordEvent(state, {
             actor: "DEV",
@@ -654,11 +687,14 @@ export class Orchestrator {
             );
           }
 
+          currentStage = "BUILD";
+          checkCancelled();
           const build = await this.dependencies.runner.run({
             workspace: state.workspacePath,
             command: "npm run build",
             timeoutMs: 120_000
           });
+          checkCancelled();
 
           await this.recordEvent(state, {
             actor: "RUNNER",
@@ -680,11 +716,14 @@ export class Orchestrator {
             })
           });
 
+          currentStage = "TEST";
+          checkCancelled();
           const tests = await this.dependencies.runner.run({
             workspace: state.workspacePath,
             command: "npm test",
             timeoutMs: 120_000
           });
+          checkCancelled();
 
           await this.recordEvent(state, {
             actor: "RUNNER",
@@ -706,6 +745,8 @@ export class Orchestrator {
             })
           });
 
+          currentStage = "VALIDATION";
+          checkCancelled();
           story.status = "TESTING";
           await this.changeStatus(state, "TESTING");
           const validationStartedAt = Date.now();
@@ -722,6 +763,7 @@ export class Orchestrator {
             }
           });
 
+          checkCancelled();
           const qaResult =
             await this.dependencies.qa.validate({
               story,
@@ -731,6 +773,7 @@ export class Orchestrator {
               workspacePath: state.workspacePath,
               assignment: this.assignmentFor(state, "QA")
             });
+          checkCancelled();
 
           if (qaResult.status === "PASS") {
             story.status = "PASSED";
@@ -804,6 +847,32 @@ export class Orchestrator {
       await this.persistState(state);
       return state;
     } catch (error) {
+      const isCancelled =
+        signal?.aborted ||
+        (error instanceof Error &&
+          (error.message.toLowerCase().includes("cancelled") ||
+            error.message.toLowerCase().includes("aborted") ||
+            error.name === "AbortError"));
+
+      if (isCancelled) {
+        state.status = "CANCELLED";
+        state.updatedAt = new Date().toISOString();
+
+        await this.recordEvent(state, {
+          actor: "ORCHESTRATOR",
+          action: "RUN_CANCELLED",
+          message: "Execução cancelada a pedido do usuário.",
+          metadata: {
+            stage: currentStage,
+            currentStoryId: state.currentStoryId,
+            attempt: state.attempt
+          }
+        });
+
+        await this.dependencies.eventStore.saveState(state);
+        return state;
+      }
+
       state.status = "FAILED";
       state.updatedAt = new Date().toISOString();
 

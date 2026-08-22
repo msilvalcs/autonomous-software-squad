@@ -5,6 +5,7 @@ import type {
   ProjectDocument,
   RunSummary,
   RunState,
+  RunStatus,
   SquadConfiguration
 } from "./types";
 
@@ -84,6 +85,30 @@ export async function resumeRun(
   }
 
   return response.json() as Promise<CreateRunResponse>;
+}
+
+export async function cancelRun(
+  runId: string
+): Promise<{ ok: boolean; runId: string; status: RunStatus }> {
+  const response = await fetch(
+    `${API_BASE_URL}/runs/${runId}/cancel`,
+    { method: "POST" }
+  );
+
+  if (!response.ok) {
+    const payload = await readErrorPayload(response);
+    throw new Error(
+      payload.activeRunId
+        ? `A execução ${payload.activeRunId} ainda está ativa.`
+        : "Não foi possível cancelar a execução."
+    );
+  }
+
+  return response.json() as Promise<{
+    ok: boolean;
+    runId: string;
+    status: RunStatus;
+  }>;
 }
 
 export async function getRun(

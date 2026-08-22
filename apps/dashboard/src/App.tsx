@@ -6,6 +6,7 @@ import {
 } from "react";
 
 import {
+  cancelRun,
   createRun,
   getArtifact,
   getDocumentation,
@@ -30,7 +31,8 @@ import "./App.css";
 const terminalStatuses: RunStatus[] = [
   "COMPLETED",
   "BLOCKED",
-  "FAILED"
+  "FAILED",
+  "CANCELLED"
 ];
 
 const selectedRunStorageKey = "squad.selectedRunId";
@@ -44,6 +46,7 @@ function App() {
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [error, setError] = useState("");
   const [starting, setStarting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [configuration, setConfiguration] =
     useState<SquadConfiguration | null>(null);
   const [actorFilter, setActorFilter] = useState("ALL");
@@ -275,6 +278,32 @@ function App() {
     }
   }
 
+  async function handleCancel() {
+    if (!runId) {
+      return;
+    }
+
+    try {
+      setCancelling(true);
+      setError("");
+      await cancelRun(runId);
+      setSubscriptionVersion((current) => current + 1);
+      const [state] = await Promise.all([
+        getRun(runId),
+        refreshHistory()
+      ]);
+      setRun(state);
+    } catch (caughtError) {
+      setError(
+        caughtError instanceof Error
+          ? caughtError.message
+          : "Erro ao cancelar a execução."
+      );
+    } finally {
+      setCancelling(false);
+    }
+  }
+
   const finished =
     run !== null &&
     terminalStatuses.includes(run.status);
@@ -383,6 +412,17 @@ function App() {
                   <span className="button-spinner" aria-hidden="true" />
                 )}
                 {runAction.label}
+              </button>
+            )}
+
+            {run?.active && (
+              <button
+                type="button"
+                className="secondary-button run-action run-action-failed"
+                disabled={cancelling}
+                onClick={() => void handleCancel()}
+              >
+                {cancelling ? "Cancelando..." : "Cancelar execução"}
               </button>
             )}
           </div>

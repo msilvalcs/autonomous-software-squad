@@ -77,6 +77,28 @@ describe("getRunAction", () => {
     });
   });
 
+  it("oferece retomada para uma execução cancelada retomável", () => {
+    expect(getRunAction(runState({
+      status: "CANCELLED",
+      canResume: true
+    }), false)).toMatchObject({
+      kind: "resume",
+      label: "Retomar execução",
+      disabled: false
+    });
+  });
+
+  it("indica execução cancelada quando não é retomável", () => {
+    expect(getRunAction(runState({
+      status: "CANCELLED",
+      canResume: false
+    }), false)).toMatchObject({
+      kind: "cancelled",
+      label: "Execução cancelada",
+      disabled: true
+    });
+  });
+
   it("não inventa uma ação quando a API nega retomabilidade", () => {
     expect(getRunAction(runState({
       status: "CREATED",

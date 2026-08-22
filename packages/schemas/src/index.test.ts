@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ExecutionPolicySchema,
+  RunStatusSchema,
   UserStorySchema
 } from "./index.js";
 
@@ -31,7 +32,6 @@ describe("UserStorySchema", () => {
     expect(result.success).toBe(false);
   });
 });
-
 describe("ExecutionPolicySchema", () => {
   it("rejeita política privilegiada", () => {
     const result = ExecutionPolicySchema.safeParse({
@@ -51,6 +51,31 @@ describe("ExecutionPolicySchema", () => {
       }
     });
 
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("RunStatusSchema", () => {
+  it("aceita todos os estados válidos incluindo CANCELLED", () => {
+    const validStatuses = [
+      "CREATED",
+      "PLANNING",
+      "DEVELOPING",
+      "TESTING",
+      "COMPLETED",
+      "BLOCKED",
+      "FAILED",
+      "CANCELLED"
+    ];
+
+    for (const status of validStatuses) {
+      const result = RunStatusSchema.safeParse(status);
+      expect(result.success).toBe(true);
+    }
+  });
+
+  it("rejeita status inválido", () => {
+    const result = RunStatusSchema.safeParse("UNKNOWN");
     expect(result.success).toBe(false);
   });
 });

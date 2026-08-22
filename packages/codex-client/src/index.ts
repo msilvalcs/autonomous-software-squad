@@ -18,6 +18,7 @@ export interface CodexRequest {
   model?: string;
   provider?: string;
   reasoningEffort?: "low" | "medium" | "high" | "xhigh" | "max";
+  signal?: AbortSignal;
 }
 
 export interface CodexResult<T> {
@@ -94,7 +95,8 @@ export class CodexClient {
       const execution = await runCodex({
         args,
         workingDirectory: request.workingDirectory,
-        timeoutMs: request.timeoutMs ?? 120_000
+        timeoutMs: request.timeoutMs ?? 120_000,
+        signal: request.signal
       });
 
       if (execution.timedOut) {
@@ -160,6 +162,7 @@ interface RunCodexInput {
   args: string[];
   workingDirectory: string;
   timeoutMs: number;
+  signal?: AbortSignal;
 }
 
 interface ProcessResult {
@@ -173,6 +176,10 @@ interface ProcessResult {
 async function runCodex(
   input: RunCodexInput
 ): Promise<ProcessResult> {
+  if (input.signal?.aborted) {
+    throw new Error("Codex execution was aborted");
+  }
+
   const startedAt = Date.now();
 
   return new Promise((resolve, reject) => {
@@ -180,6 +187,7 @@ async function runCodex(
     let stderr = "";
     let timedOut = false;
     let settled = false;
+    let sigkillTimer: NodeJS.Timeout | undefined;
 
     const child = spawn("codex", input.args, {
       cwd: path.resolve(input.workingDirectory),
@@ -187,6 +195,38 @@ async function runCodex(
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"]
     });
+
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      try {
+        child.kill("SIGTERM");
+        sigkillTimer = setTimeout(() => {
+          try {
+            child.kill("SIGKILL");
+          } catch {
+            // Process may already have terminated
+          }
+        }, 1000);
+        sigkillTimer.unref?.();
+      } catch {
+        // Process may already have terminated
+      }
+      reject(new Error("Codex execution was aborted"));
+    };
+
+    if (input.signal) {
+      input.signal.addEventListener("abort", onAbort, { once: true });
+    }
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      if (sigkillTimer) clearTimeout(sigkillTimer);
+      if (input.signal) {
+        input.signal.removeEventListener("abort", onAbort);
+      }
+    };
 
     const timeout = setTimeout(() => {
       timedOut = true;
@@ -202,7 +242,7 @@ async function runCodex(
     });
 
     child.on("error", (error) => {
-      clearTimeout(timeout);
+      cleanup();
 
       if (!settled) {
         settled = true;
@@ -211,7 +251,7 @@ async function runCodex(
     });
 
     child.on("close", (exitCode) => {
-      clearTimeout(timeout);
+      cleanup();
 
       if (!settled) {
         settled = true;

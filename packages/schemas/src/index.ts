@@ -151,8 +151,11 @@ export const RunStatusSchema = z.enum([
   "TESTING",
   "COMPLETED",
   "BLOCKED",
-  "FAILED"
+  "FAILED",
+  "CANCELLED"
 ]);
+
+export type RunStatus = z.infer<typeof RunStatusSchema>;
 
 export const RunStateSchema = z.object({
   runId: z.string().min(1),

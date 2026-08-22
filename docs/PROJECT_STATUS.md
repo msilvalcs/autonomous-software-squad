@@ -150,7 +150,9 @@ não uma evidência de falha das cinco funcionalidades já aprovadas.
 ### P2 - Evolução após a entrega
 
 - [ ] Transmitir logs do Codex progressivamente para a timeline.
-- [ ] Adicionar cancelamento cooperativo de runs.
+- [x] Adicionar cancelamento cooperativo de runs no Orquestrador, Codex Client,
+  API e dashboard. Ainda falta interromper comandos do Runner no meio da
+  execução.
 - [ ] Recuperar runs não terminais automaticamente no startup.
 - [ ] Melhorar o modo watch dos pacotes internos.
 - [ ] Isolar o Developer em container próprio, mantendo PO e QA com políticas
@@ -167,7 +169,8 @@ não uma evidência de falha das cinco funcionalidades já aprovadas.
 - a execução de stories é sequencial;
 - o lock de execução ativa pertence ao processo da API;
 - JSONL é adequado ao MVP, mas não a concorrência distribuída;
-- não existe cancelamento imediato de um agente em processamento;
+- o cancelamento cooperativo já interrompe o Codex e os próximos estágios, mas
+  um comando npm já iniciado pelo Runner só é observado após seu retorno;
 - não existe retomada automática após reinício da API;
 - Firecracker exige Linux/KVM e ainda não possui ciclo de vida homologado;
 - uma run que atinge `maxAttempts` não pode ser retomada pela interface.
