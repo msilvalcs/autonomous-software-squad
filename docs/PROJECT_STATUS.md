@@ -32,6 +32,10 @@ Python, Go, Maven, Gradle, .NET e Rust. A análise ignora links simbólicos e
 diretórios de dependências, limita profundidade, quantidade e tamanho de
 arquivos e não executa scripts encontrados no repositório.
 
+O marco agnóstico está publicado até o commit `5ad6f8a`. O GitHub Actions
+`32744524758` passou com typecheck, build, suíte completa, Playwright no Runner
+Node e execução real das fixtures Python e Go nas imagens diferenciais.
+
 ## Estado por área
 
 | Área | Estado | Evidência atual |
@@ -43,9 +47,9 @@ arquivos e não executa scripts encontrados no repositório.
 | Auditoria | Funcional | Estado em JSON e eventos em JSONL, incluindo decisões e alternativas |
 | GitHub Issues | Funcional e opcional | Seis stories de isolamento publicadas e concluídas |
 | Runner local | Funcional | Allowlist, timeout, captura de evidências e workspace controlado |
-| Runner Docker | Funcional e validado | Container efêmero, usuário sem root, rede controlada, Chromium e limites de recursos |
-| Entrega | Funcional para runs concluídas | Preview, manifesto e download ZIP |
-| CI | Verde | Typecheck, testes, build da imagem Docker e integração Playwright |
+| Runner Docker | Funcional e multi-stack | Base Node e imagens diferenciais Python/Go, usuário sem root, rede e recursos limitados |
+| Entrega | Funcional com aprovação | Diff Git, aprovação explícita, preview, manifesto e ZIP após conclusão |
+| CI | Verde | Typecheck, testes, Playwright e execução Docker real em Node, Python e Go |
 | MicroVM | Avaliada, não operacional | Gate fail-closed e critérios de adoção documentados no ADR-010 |
 
 ## O que já foi concluído
@@ -195,7 +199,7 @@ também os testes Playwright dentro da imagem provisionada.
   issue, evento e entrega.
 - [ ] Registrar métricas simples de duração, número de tentativas e resultado
   por story.
-- [ ] Confirmar o dashboard em 1280 px e 375 px no navegador.
+- [x] Confirmar o dashboard em 1280 px e 375 px no navegador.
 
 ### P2 - Evolução após a entrega
 
@@ -214,18 +218,18 @@ também os testes Playwright dentro da imagem provisionada.
 
 ## Riscos e limitações conhecidas
 
-- o Codex Developer ainda é executado no host, embora os comandos npm possam
+- o Codex Developer ainda é executado no host, embora os comandos do projeto possam
   ser isolados pelo Docker Runner;
 - a execução de stories é sequencial;
 - o lock de execução ativa pertence ao processo da API;
 - JSONL é adequado ao MVP, mas não a concorrência distribuída;
 - o cancelamento cooperativo já interrompe o Codex e os próximos estágios, mas
-  um comando npm já iniciado pelo Runner só é observado após seu retorno;
+  um comando já iniciado pelo Runner só é observado após seu retorno;
 - não existe retomada automática após reinício da API;
 - Firecracker exige Linux/KVM e ainda não possui ciclo de vida homologado;
 - uma run que atinge `maxAttempts` não pode ser retomada pela interface.
-- os perfis Python e Go possuem fixtures e detecção validadas, mas sua execução
-  real é pulada em ambientes que não oferecem os respectivos runtimes;
+- os perfis Python e Go possuem fixtures e execução Docker validadas no CI; no
+  LocalRunner elas são puladas quando os runtimes não estão instalados;
 - o Docker Runner seleciona imagens diferenciais configuradas conforme o
   perfil. Python e Go já possuem Dockerfiles; JVM, .NET e Rust ainda precisam
   de homologação.
