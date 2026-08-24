@@ -194,3 +194,96 @@ export const AuditEventSchema = z.object({
 });
 
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
+
+/** Source repository supplied to a future orchestration run. */
+const GitRepositoryUrlSchema = z.string().min(1).refine(
+  (value) => value.startsWith("git@") || /^https?:\/\//.test(value) || /^ssh:\/\//.test(value),
+  "repository URL must be HTTPS, SSH, or scp-like Git syntax"
+);
+
+export const RepositorySourceSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("local"), path: z.string().min(1) }),
+  z.object({
+    type: z.literal("git"),
+    url: GitRepositoryUrlSchema,
+    ref: z.string().min(1).optional()
+  })
+]);
+
+export type RepositorySource = z.infer<typeof RepositorySourceSchema>;
+
+export const ProjectCommandPurposeSchema = z.enum([
+  "install",
+  "lint",
+  "typecheck",
+  "test",
+  "build",
+  "start"
+]);
+
+export const ProjectCommandSchema = z.object({
+  executable: z.string().min(1),
+  args: z.array(z.string()),
+  purpose: ProjectCommandPurposeSchema,
+  workingDirectory: z.string().min(1).refine((value) => {
+    if (value === ".") return true;
+    if (value.startsWith("/") || value.startsWith("\\") || /^[A-Za-z]:/.test(value)) return false;
+    const segments = value.split(/[\\/]/);
+    return segments.every((segment) => segment.length > 0 && segment !== "." && segment !== "..");
+  }, "workingDirectory must be a safe relative path inside the workspace").default("."),
+  networkAccess: z.enum(["none", "install-only"]).default("none"),
+  timeoutMs: z.number().int().positive().default(120_000)
+});
+
+export type ProjectCommand = z.infer<typeof ProjectCommandSchema>;
+
+const ProjectProfileCommandsSchema = z.object({
+  install: ProjectCommandSchema.optional(),
+  lint: ProjectCommandSchema.optional(),
+  typecheck: ProjectCommandSchema.optional(),
+  test: ProjectCommandSchema.optional(),
+  build: ProjectCommandSchema.optional(),
+  start: ProjectCommandSchema.optional()
+});
+
+export const ProjectProfileSchema = z.object({
+  languages: z.array(z.string().min(1)),
+  frameworks: z.array(z.string().min(1)).default([]),
+  packageManagers: z.array(z.string().min(1)).default([]),
+  isMonorepo: z.boolean().default(false),
+  commands: ProjectProfileCommandsSchema,
+  detectedFiles: z.array(z.string().min(1)).default([])
+}).superRefine(({ commands }, context) => {
+  for (const purpose of Object.keys(commands) as Array<keyof typeof commands>) {
+    const command = commands[purpose];
+    if (command && command.purpose !== purpose) {
+      context.addIssue({
+        code: "custom",
+        path: ["commands", purpose, "purpose"],
+        message: `command purpose must be ${purpose}`
+      });
+    }
+  }
+});
+
+export type ProjectProfile = z.infer<typeof ProjectProfileSchema>;
+
+export const RepositoryMetadataSchema = z.object({
+  source: RepositorySourceSchema,
+  name: z.string().min(1),
+  ref: z.string().min(1).nullable().default(null),
+  commit: z.string().min(1).nullable().default(null)
+});
+
+export type RepositoryMetadata = z.infer<typeof RepositoryMetadataSchema>;
+
+export const WorkspaceMetadataSchema = z.object({
+  runId: z.string().min(1),
+  path: z.string().min(1),
+  repository: RepositoryMetadataSchema,
+  profile: ProjectProfileSchema,
+  createdAt: z.string().datetime(),
+  sourceIsolated: z.boolean().default(true)
+});
+
+export type WorkspaceMetadata = z.infer<typeof WorkspaceMetadataSchema>;

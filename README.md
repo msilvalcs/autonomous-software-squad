@@ -4,6 +4,14 @@ Sistema multiagente que transforma um briefing de cliente em backlog, implementa
 
 O projeto foi concebido para a **Trilha B — Squad Autônomo de Agentes** do Hackathon Reply. O objetivo não é apresentar apenas três chats independentes, mas um fluxo coordenado no qual Product Owner, Developer e Quality Assurance possuem responsabilidades específicas e são controlados por uma máquina de estados.
 
+## Direção de evolução
+
+O próximo ciclo redefine o produto como um orquestrador agnóstico de
+repositórios. A entrada planejada poderá ser um caminho local ou uma URL Git,
+e a stack será analisada antes de qualquer execução. Os contratos iniciais para
+essa direção já estão disponíveis em `@squad/schemas`; as integrações ainda
+serão adaptadas em incrementos posteriores.
+
 ## Estado atual
 
 | Componente | Estado | Implementação atual |

@@ -18,6 +18,11 @@ O projeto está tecnicamente avançado, mas ainda não deve ser tratado como uma
 entrega final. O próximo marco é obter uma nova run Codex concluída em Docker,
 com preview, ZIP e evidência E2E no dashboard.
 
+O direcionamento aprovado para os próximos incrementos é evoluir o sistema
+para um orquestrador agnóstico de repositórios. O ADR-012 e os contratos
+compartilhados de origem, perfil, comandos e workspace foram adicionados, mas
+essas funcionalidades ainda não estão integradas ao fluxo de execução atual.
+
 ## Estado por área
 
 | Área | Estado | Evidência atual |
@@ -137,6 +142,16 @@ unitários sem exigir Chromium; o DockerRunner define `RUN_E2E=true` e executa
 também os testes Playwright dentro da imagem provisionada.
 
 ## O que precisa ser feito
+
+### P0 - Evolução para repositórios existentes
+
+- [x] Definir contratos Zod retrocompatíveis para origem local/Git, perfil,
+  comandos e metadados de workspace.
+- [ ] Implementar Workspace Manager para materializar cópias isoladas de
+  caminhos locais e referências Git.
+- [ ] Implementar análise somente leitura de linguagem, framework e comandos.
+- [ ] Adaptar Runner e agentes para consumir comandos estruturados.
+- [ ] Integrar origem de repositório ao fluxo da API e do dashboard.
 
 ### P0 - Fechar a entrega atual
 

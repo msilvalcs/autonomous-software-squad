@@ -110,6 +110,7 @@ deve ser persistida na auditoria.
 
 - Skills são opcionais e ficam em `.agents/skills` quando aprovadas e versionadas.
 - O Workspace Manager copia esse conjunto revisado para o workspace de cada execução; não crie links simbólicos dentro das skills.
+- O direcionamento futuro é operar sobre repositórios locais ou Git de qualquer stack; os contratos iniciais estão em `packages/schemas`, mas a integração ainda não existe.
 - PO usa `backlog-decomposition` para decomposição auditável do briefing.
 - Developer pode usar TDD, diagnóstico e design de código dentro do workspace.
 - QA pode usar diagnóstico somente em leitura.
