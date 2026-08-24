@@ -14,7 +14,10 @@ import type {
   QaResult,
   ReasoningEffort,
   RunState,
-  TaskComplexity
+  TaskComplexity,
+  RepositorySource,
+  RepositoryMetadata,
+  ProjectCommand
 } from "@squad/schemas";
 import { QaResultSchema } from "@squad/schemas";
 
@@ -24,6 +27,7 @@ import type {
   ExecutionRunner,
   WorkspaceManager
 } from "@squad/runner";
+import type { ProjectAnalyzer } from "@squad/project-analyzer";
 
 export interface OrchestratorDependencies {
   po: ProductOwnerAgent;
@@ -31,10 +35,9 @@ export interface OrchestratorDependencies {
   qa: QualityAssuranceAgent;
   eventStore: JsonlEventStore;
   runner: ExecutionRunner;
-  workspaceManager: Pick<
-    WorkspaceManager,
-    "prepareWorkspace"
-  >;
+  workspaceManager: Pick<WorkspaceManager, "prepareWorkspace"> &
+    Partial<Pick<WorkspaceManager, "prepareRepositoryWorkspace">>;
+  projectAnalyzer?: Pick<ProjectAnalyzer, "analyzeProject">;
   routingPolicy?: ModelRoutingPolicy;
   isolationPolicy?: IsolationPolicy;
   storyPublisher?: StoryPublisher;
@@ -317,6 +320,7 @@ function executionPoliciesFor(
 export interface CreateRunInput {
   briefing: string;
   maxAttempts?: number;
+  repositorySource?: RepositorySource;
 }
 
 export function canResumeRun(
@@ -387,10 +391,20 @@ export class Orchestrator {
       routing.complexity
     );
 
-    const workspacePath =
-      await this.dependencies.workspaceManager.prepareWorkspace(
-        runId
-      );
+    const workspacePath = input.repositorySource && this.dependencies.workspaceManager.prepareRepositoryWorkspace
+      ? await this.dependencies.workspaceManager.prepareRepositoryWorkspace(runId, input.repositorySource)
+      : await this.dependencies.workspaceManager.prepareWorkspace(runId);
+    const profile = input.repositorySource && this.dependencies.projectAnalyzer
+      ? await this.dependencies.projectAnalyzer.analyzeProject(workspacePath)
+      : undefined;
+    const repository = input.repositorySource ? {
+      source: input.repositorySource,
+      name: input.repositorySource.type === "local"
+        ? input.repositorySource.path.split(/[\\/]/).filter(Boolean).pop() ?? "repository"
+        : input.repositorySource.url.split(/[\\/]/).filter(Boolean).pop()?.replace(/\.git$/, "") ?? "repository",
+      ref: input.repositorySource.type === "git" ? input.repositorySource.ref ?? null : null,
+      commit: null
+    } satisfies RepositoryMetadata : undefined;
 
     const now = new Date().toISOString();
 
@@ -408,6 +422,9 @@ export class Orchestrator {
       ),
       stories: [],
       workspacePath,
+      repositorySource: input.repositorySource,
+      repository,
+      profile,
       createdAt: now,
       updatedAt: now
     };
@@ -419,6 +436,15 @@ export class Orchestrator {
       action: "RUN_CREATED",
       message: "Execução criada a partir do briefing."
     });
+
+    if (input.repositorySource) {
+      await this.recordEvent(state, {
+        actor: "ORCHESTRATOR",
+        action: "REPOSITORY_ANALYZED",
+        message: "Repositório materializado e perfil técnico analisado.",
+        metadata: { source: input.repositorySource, repository, profile, decision: "usar comandos detectados" }
+      });
+    }
 
     await this.recordEvent(state, {
       actor: "ORCHESTRATOR",
@@ -589,7 +615,8 @@ export class Orchestrator {
         checkCancelled();
         const backlog = await this.dependencies.po.createBacklog(
           state.briefing,
-          this.assignmentFor(state, "PO")
+          this.assignmentFor(state, "PO"),
+          state.profile
         );
         checkCancelled();
         state.stories = backlog.stories;
@@ -670,7 +697,8 @@ export class Orchestrator {
               story,
               previousQaResult,
               workspacePath: state.workspacePath,
-              assignment: this.assignmentFor(state, "DEV")
+              assignment: this.assignmentFor(state, "DEV"),
+              profile: state.profile
             });
           checkCancelled();
 
@@ -701,11 +729,7 @@ export class Orchestrator {
 
           currentStage = "BUILD";
           checkCancelled();
-          const build = await this.dependencies.runner.run({
-            workspace: state.workspacePath,
-            command: "npm run build",
-            timeoutMs: 120_000
-          });
+          const build = await this.runValidationCommand(state, environment, "build", story.id);
           checkCancelled();
 
           await this.recordEvent(state, {
@@ -730,11 +754,7 @@ export class Orchestrator {
 
           currentStage = "TEST";
           checkCancelled();
-          const tests = await this.dependencies.runner.run({
-            workspace: state.workspacePath,
-            command: "npm test",
-            timeoutMs: 120_000
-          });
+          const tests = await this.runValidationCommand(state, environment, "test", story.id);
           checkCancelled();
 
           await this.recordEvent(state, {
@@ -783,7 +803,8 @@ export class Orchestrator {
               build,
               tests,
               workspacePath: state.workspacePath,
-              assignment: this.assignmentFor(state, "QA")
+              assignment: this.assignmentFor(state, "QA"),
+              profile: state.profile
             });
           checkCancelled();
 
@@ -1055,11 +1076,13 @@ export class Orchestrator {
       metadata: this.environmentMetadata(environment, "INSTALL")
     });
 
-    const installation = await this.dependencies.runner.run({
-      workspace: state.workspacePath,
-      command: "npm install",
-      timeoutMs: 180_000
-    });
+    const projectRunner = this.dependencies.runner as typeof this.dependencies.runner & {
+      runProjectCommand?: (request: { workspace: string; command: ProjectCommand; approvedCommands: ProjectCommand[]; timeoutMs?: number }) => Promise<Awaited<ReturnType<ExecutionRunner["run"]>>>;
+    };
+    const installCommand = state.profile?.commands.install;
+    const installation = installCommand && projectRunner.runProjectCommand
+      ? await projectRunner.runProjectCommand({ workspace: state.workspacePath, command: installCommand, approvedCommands: Object.values(state.profile?.commands ?? {}).filter((value): value is ProjectCommand => Boolean(value)), timeoutMs: 180_000 })
+      : await this.dependencies.runner.run({ workspace: state.workspacePath, command: "npm install", timeoutMs: 180_000 });
 
     await this.recordEvent(state, {
       actor: "RUNNER",
@@ -1082,6 +1105,37 @@ export class Orchestrator {
     if (installation.exitCode !== 0 || installation.timedOut) {
       throw new Error("Dependency installation failed");
     }
+  }
+
+  private async runValidationCommand(
+    state: RunState,
+    environment: ExecutionEnvironment,
+    purpose: "build" | "test",
+    storyId: string
+  ): Promise<Awaited<ReturnType<ExecutionRunner["run"]>>> {
+    const command = state.profile?.commands[purpose];
+    const projectRunner = this.dependencies.runner as typeof this.dependencies.runner & {
+      runProjectCommand?: (request: { workspace: string; command: ProjectCommand; approvedCommands: ProjectCommand[]; timeoutMs?: number }) => Promise<Awaited<ReturnType<ExecutionRunner["run"]>>>;
+    };
+    if (command && projectRunner.runProjectCommand) {
+      return projectRunner.runProjectCommand({
+        workspace: state.workspacePath,
+        command,
+        approvedCommands: Object.values(state.profile?.commands ?? {}).filter((value): value is ProjectCommand => Boolean(value)),
+        timeoutMs: command.timeoutMs
+      });
+    }
+    if (state.profile) {
+      await this.recordEvent(state, {
+        actor: "RUNNER",
+        action: "VALIDATION_COMMAND_SKIPPED",
+        message: `Comando ${purpose} não foi detectado; validação ignorada sem inventar comando.`,
+        storyId,
+        metadata: this.environmentMetadata(environment, purpose.toUpperCase(), { purpose, reason: "profile command absent" })
+      });
+      return { command: `${purpose} (skipped)`, exitCode: 0, stdout: "", stderr: "", durationMs: 0, timedOut: false };
+    }
+    return this.dependencies.runner.run({ workspace: state.workspacePath, command: purpose === "build" ? "npm run build" : "npm test", timeoutMs: 120_000 });
   }
 
   private async changeStatus(

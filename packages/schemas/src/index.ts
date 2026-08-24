@@ -169,6 +169,9 @@ export const RunStateSchema = z.object({
   executionPolicies: z.array(ExecutionPolicySchema).default([]),
   stories: z.array(UserStorySchema),
   workspacePath: z.string().min(1),
+  repositorySource: z.lazy(() => RepositorySourceSchema).optional(),
+  repository: z.lazy(() => RepositoryMetadataSchema).optional(),
+  profile: z.lazy(() => ProjectProfileSchema).optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime()
 });

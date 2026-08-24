@@ -14,6 +14,7 @@
   "dependencies": {
     "@squad/agents": "*",
     "@squad/event-store": "*",
+    "@squad/project-analyzer": "*",
     "@squad/runner": "*",
     "@squad/schemas": "*"
   },

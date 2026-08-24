@@ -11,7 +11,8 @@ import {
 import { JsonlEventStore } from "@squad/event-store";
 import type {
   AuditEvent,
-  UserStory
+  UserStory,
+  ProjectProfile
 } from "@squad/schemas";
 
 import {
@@ -38,6 +39,8 @@ async function createOrchestrator(
     failDispose?: boolean;
     failPrepareOnce?: boolean;
     minimumIsolationHigh?: "local" | "docker" | "microvm";
+    repository?: boolean;
+    profile?: ProjectProfile;
   } = {}
 ) {
   const directory = await mkdtemp(
@@ -57,6 +60,7 @@ async function createOrchestrator(
     timedOut: false
   };
   const executedCommands: string[] = [];
+  const structuredCommands: string[] = [];
   const lifecycleCalls: string[] = [];
   let preparationAttempts = 0;
 
@@ -102,6 +106,13 @@ async function createOrchestrator(
       executedCommands.push(input.command);
       return successfulExecution;
     },
+    ...(options.repository ? {
+      runProjectCommand: async (input: { command: { executable: string; args: string[] } }) => {
+        const command = [input.command.executable, ...input.command.args].join(" ");
+        structuredCommands.push(command);
+        return { ...successfulExecution, command };
+      }
+    } : {}),
     dispose: async (workspace: string) => {
       lifecycleCalls.push(`dispose:${workspace}`);
 
@@ -113,7 +124,10 @@ async function createOrchestrator(
 
   const workspaceManager = {
     prepareWorkspace: async (runId: string) =>
-      path.join(directory, "generated-projects", runId)
+      path.join(directory, "generated-projects", runId),
+    ...(options.repository ? {
+      prepareRepositoryWorkspace: async (runId: string) => path.join(directory, "repository", runId)
+    } : {})
   };
 
   const orchestrator = new Orchestrator({
@@ -123,6 +137,12 @@ async function createOrchestrator(
     eventStore,
     runner,
     workspaceManager,
+    ...(options.repository ? {
+      projectAnalyzer: { analyzeProject: async () => options.profile ?? {
+        languages: ["Go"], frameworks: [], packageManagers: ["go"], isMonorepo: false,
+        commands: {}, detectedFiles: ["go.mod"]
+      } }
+    } : {}),
     isolationPolicy: new MinimumIsolationPolicy({
       HIGH: options.minimumIsolationHigh
     }),
@@ -133,7 +153,8 @@ async function createOrchestrator(
     orchestrator,
     eventStore,
     executedCommands,
-    lifecycleCalls
+    lifecycleCalls,
+    structuredCommands
   };
 }
 
@@ -146,6 +167,56 @@ afterEach(async () => {
 });
 
 describe("Orchestrator", () => {
+  it("materializa e analisa uma origem repository, persistindo perfil e evento", async () => {
+    const profile: ProjectProfile = {
+      languages: ["Go"], frameworks: [], packageManagers: ["go"], isMonorepo: false,
+      commands: {}, detectedFiles: ["go.mod"]
+    };
+    const { orchestrator, eventStore } = await createOrchestrator(undefined, { repository: true, profile });
+    const state = await orchestrator.createRun({
+      briefing: "Corrigir o endpoint.",
+      repositorySource: { type: "local", path: "/tmp/example" }
+    });
+    expect(state.repositorySource).toEqual({ type: "local", path: "/tmp/example" });
+    expect(state.profile).toEqual(profile);
+    const events = await eventStore.listEvents(state.runId);
+    expect(events.some((event) => event.action === "REPOSITORY_ANALYZED")).toBe(true);
+  });
+
+  it("executa build e test estruturados usando o perfil detectado", async () => {
+    const profile: ProjectProfile = {
+      languages: ["Go"], frameworks: [], packageManagers: ["go"], isMonorepo: false,
+      commands: {
+        build: { executable: "go", args: ["build", "./..."], purpose: "build", workingDirectory: ".", networkAccess: "none", timeoutMs: 120000 },
+        test: { executable: "go", args: ["test", "./..."], purpose: "test", workingDirectory: ".", networkAccess: "none", timeoutMs: 120000 }
+      }, detectedFiles: ["go.mod"]
+    };
+    const result = await createOrchestrator(undefined, { repository: true, profile });
+    const state = await result.orchestrator.createRun({ briefing: "Corrigir endpoint.", repositorySource: { type: "local", path: "/tmp/example" } });
+    await result.orchestrator.execute(state);
+    expect(result.structuredCommands).toHaveLength(8);
+    expect(result.structuredCommands).toEqual(
+      Array.from({ length: 4 }).flatMap(() => [
+        "go build ./...",
+        "go test ./..."
+      ])
+    );
+  });
+
+  it("registra skip para build/test ausentes no perfil repository", async () => {
+    const result = await createOrchestrator(undefined, { repository: true });
+    const state = await result.orchestrator.createRun({ briefing: "Corrigir endpoint.", repositorySource: { type: "local", path: "/tmp/example" } });
+    await result.orchestrator.execute(state);
+    const events = await result.eventStore.listEvents(state.runId);
+    expect(
+      events.filter(
+        (event) => event.action === "VALIDATION_COMMAND_SKIPPED"
+      )
+    ).toHaveLength(8);
+    expect(result.executedCommands).not.toContain("npm run build");
+    expect(result.executedCommands).not.toContain("npm test");
+  });
+
   it("executa PO, Developer e QA até concluir as stories", async () => {
     const { orchestrator, eventStore, lifecycleCalls } =
       await createOrchestrator();

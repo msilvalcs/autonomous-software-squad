@@ -5,6 +5,7 @@ import {
   type Backlog,
   type DeveloperResult,
   type ModelAssignment,
+  type ProjectProfile,
   type QaResult,
   type UserStory
 } from "@squad/schemas";
@@ -22,7 +23,8 @@ export interface ExecutionEvidence {
 export interface ProductOwnerAgent {
   createBacklog(
     briefing: string,
-    assignment?: ModelAssignment
+    assignment?: ModelAssignment,
+    profile?: ProjectProfile
   ): Promise<Backlog>;
 }
 
@@ -31,6 +33,7 @@ export interface DeveloperInput {
   previousQaResult: QaResult | null;
   workspacePath: string;
   assignment?: ModelAssignment;
+  profile?: ProjectProfile;
 }
 
 export interface DeveloperAgent {
@@ -44,6 +47,7 @@ export interface QaInput {
   tests: ExecutionEvidence;
   workspacePath: string;
   assignment?: ModelAssignment;
+  profile?: ProjectProfile;
 }
 
 export interface QualityAssuranceAgent {
@@ -221,7 +225,8 @@ export class CodexProductOwnerAgent
 
   async createBacklog(
     briefing: string,
-    assignment?: ModelAssignment
+    assignment?: ModelAssignment,
+    profile?: ProjectProfile
   ): Promise<Backlog> {
     if (briefing.trim() === "") {
       throw new Error("Briefing cannot be empty");
@@ -247,6 +252,9 @@ Regras:
 
 Briefing do cliente:
 ${briefing}
+
+Contexto técnico detectado (quando fornecido):
+${JSON.stringify(profile ?? null, null, 2)}
 `.trim();
 
     const result = await this.client.generate<unknown>({
@@ -278,7 +286,7 @@ ${briefing}
 }
 
 export class MockProductOwnerAgent implements ProductOwnerAgent {
-  async createBacklog(briefing: string): Promise<Backlog> {
+  async createBacklog(briefing: string, _assignment?: ModelAssignment, _profile?: ProjectProfile): Promise<Backlog> {
     if (briefing.trim() === "") {
       throw new Error("Briefing cannot be empty");
     }
@@ -360,6 +368,9 @@ ${JSON.stringify(input.story, null, 2)}
 
 Relatorio anterior do QA:
 ${JSON.stringify(input.previousQaResult, null, 2)}
+
+Perfil técnico detectado:
+${JSON.stringify(input.profile ?? null, null, 2)}
 `.trim();
 
     const result = await this.client.generate<unknown>({
@@ -463,6 +474,9 @@ ${formatEvidence(input.build)}
 
 Evidencia de testes:
 ${formatEvidence(input.tests)}
+
+Perfil técnico detectado:
+${JSON.stringify(input.profile ?? null, null, 2)}
 `.trim();
 
     const result = await this.client.generate<unknown>({

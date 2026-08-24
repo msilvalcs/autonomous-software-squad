@@ -20,12 +20,13 @@ com preview, ZIP e evidência E2E no dashboard.
 
 O direcionamento aprovado para os próximos incrementos é evoluir o sistema
 para um orquestrador agnóstico de repositórios. O ADR-012 e os contratos
-compartilhados de origem, perfil, comandos e workspace foram adicionados, mas
-essas funcionalidades ainda não estão integradas ao fluxo de execução atual.
+compartilhados de origem, perfil, comandos e workspace foram adicionados. O
+modo repositório já está integrado ao Orquestrador, mas ainda não à API e ao
+dashboard.
 
 O Workspace Manager já materializa fontes locais e repositórios Git em cópias
 isoladas, com validação de caminhos, exclusão de artefatos e limpeza segura em
-falhas. Essa capacidade ainda não está integrada ao orquestrador.
+falhas. O Orquestrador utiliza essa capacidade quando recebe uma origem.
 
 O Project Analyzer já produz um perfil validado e somente leitura para Node.js,
 Python, Go, Maven, Gradle, .NET e Rust. A análise ignora links simbólicos e
@@ -156,10 +157,10 @@ também os testes Playwright dentro da imagem provisionada.
 
 - [x] Definir contratos Zod retrocompatíveis para origem local/Git, perfil,
   comandos e metadados de workspace.
-- [ ] Implementar Workspace Manager para materializar cópias isoladas de
+- [x] Implementar Workspace Manager para materializar cópias isoladas de
   caminhos locais e referências Git.
 - [x] Implementar análise somente leitura de linguagem, framework e comandos.
-- [ ] Adaptar Runner e agentes para consumir comandos estruturados.
+- [x] Adaptar Runner, Orquestrador e agentes para consumir comandos estruturados.
 - [ ] Integrar origem de repositório ao fluxo da API e do dashboard.
 
 ### P0 - Fechar a entrega atual
