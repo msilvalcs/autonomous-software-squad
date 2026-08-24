@@ -31,3 +31,5 @@ equivalentes, mas suas imagens ainda precisam ser homologadas.
 - não existe fallback de Docker para o host;
 - novas imagens reutilizam usuário sem root, filesystem somente leitura,
   limites de recursos e política de rede da base.
+- stacks compiladas usam um tmpfs executável dedicado em `/runner-tmp`, sem
+  persistência e sem acesso ao host. `/tmp` permanece `noexec`.

@@ -474,6 +474,10 @@ describe("DockerRunner", () => {
     expect(args).toContain("--pids-limit");
     expect(args).toContain("--shm-size");
     expect(args).toContain(
+      "/runner-tmp:rw,exec,nosuid,nodev,size=268435456"
+    );
+    expect(args).toContain("GOTMPDIR=/runner-tmp");
+    expect(args).toContain(
       "PLAYWRIGHT_BROWSERS_PATH=/ms-playwright"
     );
     expect(args).toContain("none");
