@@ -12,6 +12,10 @@ e a stack será analisada antes de qualquer execução. Os contratos iniciais pa
 essa direção já estão disponíveis em `@squad/schemas`; as integrações ainda
 serão adaptadas em incrementos posteriores.
 
+O pacote `@squad/project-analyzer` já detecta, sem executar código do projeto,
+perfis Node.js, Python, Go, Java, Kotlin, .NET e Rust. O resultado ainda não é
+consumido pela API ou pelo Orquestrador.
+
 ## Estado atual
 
 | Componente | Estado | Implementação atual |

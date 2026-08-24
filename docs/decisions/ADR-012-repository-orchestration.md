@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposto
+Aceito
 
 ## Contexto
 
@@ -26,7 +26,11 @@ com a allowlist existente e evita tratar texto livre como shell.
 
 - Os contratos são retrocompatíveis: os schemas existentes e o fluxo baseado em
   template continuam inalterados neste incremento.
-- Analyzer, Workspace Manager, Runner, API e dashboard ainda precisam ser
-  adaptados em incrementos posteriores.
-- A detecção de linguagem não é inferida por este ADR; ela será uma etapa de
-  análise somente leitura.
+- Runner, Orquestrador, API e dashboard ainda precisam consumir os novos
+  contratos em incrementos posteriores.
+- A detecção de linguagem é conservadora, somente leitura e baseada em arquivos
+  conhecidos; projetos desconhecidos produzem um perfil vazio válido.
+
+O primeiro incremento implementa os contratos, a materialização isolada de
+fontes locais e Git e o Project Analyzer somente leitura. A integração dessas
+capacidades ao Orquestrador, Runner, API e dashboard permanece pendente.

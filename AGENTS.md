@@ -43,6 +43,7 @@ Não descreva uma funcionalidade planejada como já implementada.
 | `packages/event-store` | Persistência do estado e eventos |
 | `packages/github-issues` | Publicação opcional e segura de stories |
 | `packages/orchestrator` | Máquina de estados e fluxo autônomo |
+| `packages/project-analyzer` | Detecção somente leitura de stack e comandos do repositório |
 | `packages/runner` | Execução controlada e workspaces |
 | `packages/schemas` | Contratos compartilhados e validação |
 | `templates` | Base imutável das aplicações geradas |

@@ -27,6 +27,11 @@ O Workspace Manager já materializa fontes locais e repositórios Git em cópias
 isoladas, com validação de caminhos, exclusão de artefatos e limpeza segura em
 falhas. Essa capacidade ainda não está integrada ao orquestrador.
 
+O Project Analyzer já produz um perfil validado e somente leitura para Node.js,
+Python, Go, Maven, Gradle, .NET e Rust. A análise ignora links simbólicos e
+diretórios de dependências, limita profundidade, quantidade e tamanho de
+arquivos e não executa scripts encontrados no repositório.
+
 ## Estado por área
 
 | Área | Estado | Evidência atual |
@@ -153,7 +158,7 @@ também os testes Playwright dentro da imagem provisionada.
   comandos e metadados de workspace.
 - [ ] Implementar Workspace Manager para materializar cópias isoladas de
   caminhos locais e referências Git.
-- [ ] Implementar análise somente leitura de linguagem, framework e comandos.
+- [x] Implementar análise somente leitura de linguagem, framework e comandos.
 - [ ] Adaptar Runner e agentes para consumir comandos estruturados.
 - [ ] Integrar origem de repositório ao fluxo da API e do dashboard.
 
