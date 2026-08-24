@@ -1647,6 +1647,23 @@ async function initializeGitBaseline(
     [0],
     timeoutMs
   );
+  await runGitWorkspaceCommand(
+    gitBinary,
+    [
+      "-c",
+      "commit.gpgsign=false",
+      "-c",
+      "core.hooksPath=/dev/null",
+      "commit",
+      "--quiet",
+      "--no-gpg-sign",
+      "--message",
+      "workspace baseline"
+    ],
+    workspace,
+    [0],
+    timeoutMs
+  );
 }
 
 async function runGitWorkspaceCommand(
@@ -1663,6 +1680,13 @@ async function runGitWorkspaceCommand(
     const child = spawn(gitBinary, args, {
       cwd,
       shell: false,
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: "Autonomous Squad",
+        GIT_AUTHOR_EMAIL: "squad@localhost",
+        GIT_COMMITTER_NAME: "Autonomous Squad",
+        GIT_COMMITTER_EMAIL: "squad@localhost"
+      },
       stdio: ["ignore", "pipe", "pipe"]
     });
     const timeout = setTimeout(() => {

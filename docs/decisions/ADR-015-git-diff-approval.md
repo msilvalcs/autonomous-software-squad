@@ -12,9 +12,10 @@ de aceitar o resultado aplicado ao workspace isolado.
 
 ## Decisão
 
-Fontes locais recebem um índice Git interno no workspace após a cópia, sem
-commit e sem alterar o repositório de origem. Clones Git usam seu próprio
-índice. Ao terminar todas as stories, o Orquestrador coleta arquivos alterados
+Fontes locais recebem um repositório Git interno no workspace após a cópia,
+com um commit de baseline de identidade local e sem alterar o repositório de
+origem. Hooks e assinatura são desativados nesse commit. Clones Git usam seu
+próprio índice. Ao terminar todas as stories, o Orquestrador coleta arquivos alterados
 e um patch binário limitado a 200 KB, persiste o conjunto na run e muda o estado
 para `AWAITING_APPROVAL`.
 
