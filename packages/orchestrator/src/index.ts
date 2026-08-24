@@ -239,7 +239,7 @@ function defaultRoute(
     return {
       provider,
       model: "gpt-5.6-luna",
-      reasoningEffort: agent === "DEV" ? "medium" : "low"
+      reasoningEffort: "low"
     };
   }
 

@@ -636,7 +636,7 @@ describe("Orchestrator", () => {
 });
 
 describe("DeterministicModelRouter", () => {
-  it("usa Luna com esforço medium para o Developer em briefing simples", () => {
+  it("usa Luna com esforço low para o Developer em briefing simples", () => {
     const router = new DeterministicModelRouter();
     const result = router.route("Criar uma lista simples de tarefas.");
 
@@ -645,7 +645,7 @@ describe("DeterministicModelRouter", () => {
       result.assignments.find((item) => item.agent === "DEV")
     ).toMatchObject({
       model: "gpt-5.6-luna",
-      reasoningEffort: "medium"
+      reasoningEffort: "low"
     });
   });
 
