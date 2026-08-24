@@ -4,12 +4,14 @@ import { constants } from "node:fs";
 import {
   access,
   cp,
+  lstat,
   mkdir,
   readdir,
   rm
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { RepositorySourceSchema, type RepositorySource } from "@squad/schemas";
 
 export type AllowedCommand =
   | "npm install"
@@ -1022,11 +1024,15 @@ export class WorkspaceManager {
   private readonly templateDirectory: string;
   private readonly generatedProjectsDirectory: string;
   private readonly approvedSkillsDirectory?: string;
+  private readonly gitBinary: string;
+  private readonly cloneTimeoutMs: number;
 
   constructor(input: {
     templateDirectory: string;
     generatedProjectsDirectory: string;
     approvedSkillsDirectory?: string;
+    gitBinary?: string;
+    cloneTimeoutMs?: number;
   }) {
     this.templateDirectory = path.resolve(
       input.templateDirectory
@@ -1039,6 +1045,12 @@ export class WorkspaceManager {
     this.approvedSkillsDirectory = input.approvedSkillsDirectory
       ? path.resolve(input.approvedSkillsDirectory)
       : undefined;
+    this.gitBinary = input.gitBinary ?? "git";
+    const cloneTimeoutMs = input.cloneTimeoutMs ?? 120_000;
+    if (!Number.isInteger(cloneTimeoutMs) || cloneTimeoutMs <= 0) {
+      throw new Error("cloneTimeoutMs must be a positive integer");
+    }
+    this.cloneTimeoutMs = cloneTimeoutMs;
   }
 
   async prepareWorkspace(runId: string): Promise<string> {
@@ -1046,14 +1058,28 @@ export class WorkspaceManager {
       throw new Error("Invalid runId");
     }
 
-    if (this.approvedSkillsDirectory) {
-      await assertNoSymbolicLinks(this.approvedSkillsDirectory);
-    }
+    return this.prepareRepositoryWorkspace(runId, {
+      type: "local",
+      path: this.templateDirectory
+    });
+  }
 
-    const destination = path.join(
-      this.generatedProjectsDirectory,
-      runId
-    );
+  async prepareRepositoryWorkspace(
+    runId: string,
+    source: RepositorySource
+  ): Promise<string> {
+    if (!/^[a-zA-Z0-9_-]+$/.test(runId)) {
+      throw new Error("Invalid runId");
+    }
+    const parsed = RepositorySourceSchema.safeParse(source);
+    if (!parsed.success) {
+      throw new Error("Invalid repository source");
+    }
+    const destination = path.join(this.generatedProjectsDirectory, runId);
+    const relative = path.relative(this.generatedProjectsDirectory, destination);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) {
+      throw new Error("Workspace is outside the generated projects directory");
+    }
 
     await mkdir(this.generatedProjectsDirectory, {
       recursive: true
@@ -1064,27 +1090,103 @@ export class WorkspaceManager {
       force: true
     });
 
-    await cp(this.templateDirectory, destination, {
-      recursive: true,
-      filter: (source) => {
-        const segments = source.split(path.sep);
-
-        return !segments.some((segment) =>
-          ["node_modules", "dist", ".git"].includes(segment)
+    try {
+      if (this.approvedSkillsDirectory) {
+        await assertNoSymbolicLinks(this.approvedSkillsDirectory);
+      }
+      if (parsed.data.type === "local") {
+        const sourcePath = path.resolve(parsed.data.path);
+        const stat = await lstat(sourcePath).catch(() => {
+          throw new Error("Repository source does not exist");
+        });
+        if (stat.isSymbolicLink()) {
+          throw new Error("Repository source cannot contain symbolic links");
+        }
+        if (!stat.isDirectory()) {
+          throw new Error("Repository source must be a directory");
+        }
+        await assertNoSymbolicLinks(sourcePath);
+        await cp(sourcePath, destination, {
+          recursive: true,
+          filter: shouldCopyPath
+        });
+      } else {
+        await cloneRepository(
+          this.gitBinary,
+          this.cloneTimeoutMs,
+          parsed.data.url,
+          destination,
+          parsed.data.ref
+        );
+        await assertNoSymbolicLinks(destination);
+      }
+      if (this.approvedSkillsDirectory) {
+        await cp(
+          this.approvedSkillsDirectory,
+          path.join(destination, ".agents", "skills"),
+          { recursive: true }
         );
       }
-    });
-
-    if (this.approvedSkillsDirectory) {
-      await cp(
-        this.approvedSkillsDirectory,
-        path.join(destination, ".agents", "skills"),
-        { recursive: true }
-      );
+    } catch (error) {
+      await rm(destination, { recursive: true, force: true });
+      throw error;
     }
 
     return destination;
   }
+}
+
+function shouldCopyPath(source: string): boolean {
+  return !source
+    .split(path.sep)
+    .some((segment) => ["node_modules", "dist", ".git"].includes(segment));
+}
+
+async function cloneRepository(
+  gitBinary: string,
+  timeoutMs: number,
+  url: string,
+  destination: string,
+  ref?: string
+): Promise<void> {
+  const args = ref
+    ? ["clone", "--branch", ref, "--", url, destination]
+    : ["clone", "--", url, destination];
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const child = spawn(gitBinary, args, {
+      shell: false,
+      stdio: ["ignore", "ignore", "ignore"]
+    });
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill("SIGTERM");
+      reject(new Error("Git clone timed out"));
+    }, timeoutMs);
+    child.on("error", () => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeout);
+        reject(new Error("Git clone process failed"));
+      }
+    });
+    child.on("close", (code) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeout);
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(
+            new Error(
+              `Git clone failed with exit code ${code ?? "unknown"}`
+            )
+          );
+        }
+      }
+    });
+  });
 }
 
 async function assertNoSymbolicLinks(directory: string): Promise<void> {
@@ -1092,7 +1194,7 @@ async function assertNoSymbolicLinks(directory: string): Promise<void> {
 
   for (const entry of entries) {
     if (entry.isSymbolicLink()) {
-      throw new Error("Approved skills cannot contain symbolic links");
+      throw new Error("Directory cannot contain symbolic links");
     }
 
     if (entry.isDirectory()) {

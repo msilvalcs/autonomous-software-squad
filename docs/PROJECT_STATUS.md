@@ -23,6 +23,10 @@ para um orquestrador agnóstico de repositórios. O ADR-012 e os contratos
 compartilhados de origem, perfil, comandos e workspace foram adicionados, mas
 essas funcionalidades ainda não estão integradas ao fluxo de execução atual.
 
+O Workspace Manager já materializa fontes locais e repositórios Git em cópias
+isoladas, com validação de caminhos, exclusão de artefatos e limpeza segura em
+falhas. Essa capacidade ainda não está integrada ao orquestrador.
+
 ## Estado por área
 
 | Área | Estado | Evidência atual |

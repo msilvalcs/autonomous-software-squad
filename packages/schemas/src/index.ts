@@ -197,7 +197,20 @@ export type AuditEvent = z.infer<typeof AuditEventSchema>;
 
 /** Source repository supplied to a future orchestration run. */
 const GitRepositoryUrlSchema = z.string().min(1).refine(
-  (value) => value.startsWith("git@") || /^https?:\/\//.test(value) || /^ssh:\/\//.test(value),
+  (value) => {
+    if (value.startsWith("git@") || value.startsWith("ssh://")) {
+      return true;
+    }
+    if (!/^https?:\/\//.test(value)) {
+      return false;
+    }
+    try {
+      const parsed = new URL(value);
+      return parsed.username.length === 0 && parsed.password.length === 0;
+    } catch {
+      return false;
+    }
+  },
   "repository URL must be HTTPS, SSH, or scp-like Git syntax"
 );
 

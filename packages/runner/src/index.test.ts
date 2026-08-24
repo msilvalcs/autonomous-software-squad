@@ -590,6 +590,97 @@ describe("WorkspaceManager", () => {
 
     await expect(
       manager.prepareWorkspace("run-001")
-    ).rejects.toThrow("cannot contain symbolic links");
+    ).rejects.toThrow("Directory cannot contain symbolic links");
+  });
+
+  it("materializa um repositório local isolado e exclui artefatos", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "squad-repository-"));
+    temporaryDirectories.push(root);
+    const source = path.join(root, "source");
+    await mkdir(path.join(source, "node_modules"), { recursive: true });
+    await mkdir(path.join(source, "dist"), { recursive: true });
+    await mkdir(path.join(source, ".git"), { recursive: true });
+    await writeFile(path.join(source, "README.md"), "original", "utf8");
+    const destination = await new WorkspaceManager({ templateDirectory: source, generatedProjectsDirectory: path.join(root, "generated") }).prepareRepositoryWorkspace("run-001", { type: "local", path: source });
+    await writeFile(path.join(destination, "README.md"), "changed", "utf8");
+    expect(await readFile(path.join(source, "README.md"), "utf8")).toBe("original");
+    await expect(access(path.join(destination, "node_modules"))).rejects.toThrow();
+    await expect(access(path.join(destination, "dist"))).rejects.toThrow();
+    await expect(access(path.join(destination, ".git"))).rejects.toThrow();
+  });
+
+  it("rejeita fonte local ausente, arquivo e symlink", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "squad-repository-"));
+    temporaryDirectories.push(root);
+    const manager = new WorkspaceManager({ templateDirectory: root, generatedProjectsDirectory: path.join(root, "generated") });
+    await expect(manager.prepareRepositoryWorkspace("run", { type: "local", path: path.join(root, "missing") })).rejects.toThrow("does not exist");
+    const file = path.join(root, "file");
+    await writeFile(file, "x", "utf8");
+    await expect(manager.prepareRepositoryWorkspace("run", { type: "local", path: file })).rejects.toThrow("directory");
+    const link = path.join(root, "link");
+    await symlink(root, link);
+    await expect(manager.prepareRepositoryWorkspace("run", { type: "local", path: link })).rejects.toThrow("symbolic links");
+    await expect(manager.prepareRepositoryWorkspace("../escape", { type: "local", path: root })).rejects.toThrow("Invalid runId");
+    await expect(manager.prepareRepositoryWorkspace("run", { type: "git", url: "file:///unsafe" })).rejects.toThrow("Invalid repository source");
+  });
+
+  it("limpa destino e não vaza entrada quando clone falha", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "squad-repository-"));
+    temporaryDirectories.push(root);
+    const fakeGit = path.join(root, "git");
+    await writeFile(fakeGit, "#!/bin/sh\nexit 1\n", "utf8");
+    await chmod(fakeGit, 0o755);
+    const destination = path.join(root, "generated", "run");
+    const error = await new WorkspaceManager({ templateDirectory: root, generatedProjectsDirectory: path.join(root, "generated"), gitBinary: fakeGit, cloneTimeoutMs: 100 }).prepareRepositoryWorkspace("run", { type: "git", url: "https://example.invalid/repo.git" }).catch((value: unknown) => value);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    expect(errorMessage).toMatch(/Git clone (failed|process)/);
+    expect(errorMessage).not.toContain("secret");
+    await expect(access(destination)).rejects.toThrow();
+  });
+
+  it("limpa destino quando clone excede timeout", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "squad-repository-"));
+    temporaryDirectories.push(root);
+    const fakeGit = path.join(root, "git");
+    await writeFile(fakeGit, "#!/bin/sh\nsleep 2\n", "utf8");
+    await chmod(fakeGit, 0o755);
+    const manager = new WorkspaceManager({
+      templateDirectory: root,
+      generatedProjectsDirectory: path.join(root, "generated"),
+      gitBinary: fakeGit,
+      cloneTimeoutMs: 50
+    });
+    await expect(
+      manager.prepareRepositoryWorkspace("run", {
+        type: "git",
+        url: "https://example.invalid/repo.git"
+      })
+    ).rejects.toThrow("timed out");
+    await expect(access(path.join(root, "generated", "run"))).rejects.toThrow();
+  });
+
+  it("rejeita symlink produzido pelo clone e limpa destino", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "squad-repository-"));
+    temporaryDirectories.push(root);
+    const fakeGit = path.join(root, "git");
+    const destination = path.join(root, "generated", "run");
+    await writeFile(
+      fakeGit,
+      `#!/bin/sh\nmkdir -p "$4"\nln -s /tmp "$4/unsafe"\n`,
+      "utf8"
+    );
+    await chmod(fakeGit, 0o755);
+    const manager = new WorkspaceManager({
+      templateDirectory: root,
+      generatedProjectsDirectory: path.join(root, "generated"),
+      gitBinary: fakeGit
+    });
+    await expect(
+      manager.prepareRepositoryWorkspace("run", {
+        type: "git",
+        url: "https://example.invalid/repo.git"
+      })
+    ).rejects.toThrow("Directory cannot contain symbolic links");
+    await expect(access(destination)).rejects.toThrow();
   });
 });

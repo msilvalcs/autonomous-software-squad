@@ -45,6 +45,7 @@ describe("repository orchestration contracts", () => {
 
   it("rejeita URL Git e comandos sem propósito", () => {
     expect(RepositorySourceSchema.safeParse({ type: "git", url: "file:///tmp/repo" }).success).toBe(false);
+    expect(RepositorySourceSchema.safeParse({ type: "git", url: "https://user:password@example.com/repo.git" }).success).toBe(false);
     expect(ProjectCommandSchema.safeParse({ executable: "pytest", args: [] }).success).toBe(false);
   });
 
