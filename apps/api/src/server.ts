@@ -27,6 +27,7 @@ import {
 } from "@squad/orchestrator";
 import {
   createExecutionRunner,
+  GitChangeInspector,
   WorkspaceManager,
   type ExecutionBackend
 } from "@squad/runner";
@@ -84,6 +85,7 @@ const workspaceManager = new WorkspaceManager({
   )
 });
 const projectAnalyzer = new ProjectAnalyzer();
+const changeInspector = new GitChangeInspector(generatedProjectsDirectory);
 
 const dockerRuntimeImages = [
   {
@@ -193,6 +195,7 @@ const orchestrator = new Orchestrator({
   runner,
   workspaceManager,
   projectAnalyzer,
+  changeInspector,
   routingPolicy,
   isolationPolicy,
   storyPublisher: githubIssuesPublisher
@@ -590,6 +593,33 @@ app.post<{
   });
 });
 
+app.post<{
+  Params: {
+    runId: string;
+  };
+}>("/runs/:runId/approve", async (request, reply) => {
+  if (activeExecutions.has(request.params.runId)) {
+    return reply.status(409).send({ error: "Run is still active" });
+  }
+  const state = await eventStore.loadState(request.params.runId);
+  if (!state) {
+    return reply.status(404).send({ error: "Run not found" });
+  }
+  if (state.status !== "AWAITING_APPROVAL") {
+    return reply.status(409).send({
+      error: "Run is not awaiting approval",
+      status: state.status
+    });
+  }
+
+  const approved = await orchestrator.approve(state);
+  return reply.send({
+    ...approved,
+    active: false,
+    canResume: false
+  });
+});
+
 app.get<{
   Params: {
     runId: string;
@@ -810,7 +840,7 @@ app.get<{
 
       const hasFinished =
         state === null ||
-        ["COMPLETED", "BLOCKED", "FAILED"].includes(
+        ["AWAITING_APPROVAL", "COMPLETED", "BLOCKED", "FAILED", "CANCELLED"].includes(
           state.status
         );
 

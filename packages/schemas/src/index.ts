@@ -149,6 +149,7 @@ export const RunStatusSchema = z.enum([
   "PLANNING",
   "DEVELOPING",
   "TESTING",
+  "AWAITING_APPROVAL",
   "COMPLETED",
   "BLOCKED",
   "FAILED",
@@ -156,6 +157,17 @@ export const RunStatusSchema = z.enum([
 ]);
 
 export type RunStatus = z.infer<typeof RunStatusSchema>;
+
+export const WorkspaceChangeSetSchema = z.object({
+  files: z.array(z.object({
+    path: z.string().min(1),
+    status: z.enum(["ADDED", "MODIFIED", "DELETED", "RENAMED", "UNTRACKED"])
+  })),
+  patch: z.string(),
+  truncated: z.boolean()
+});
+
+export type WorkspaceChangeSet = z.infer<typeof WorkspaceChangeSetSchema>;
 
 export const RunStateSchema = z.object({
   runId: z.string().min(1),
@@ -172,6 +184,7 @@ export const RunStateSchema = z.object({
   repositorySource: z.lazy(() => RepositorySourceSchema).optional(),
   repository: z.lazy(() => RepositoryMetadataSchema).optional(),
   profile: z.lazy(() => ProjectProfileSchema).optional(),
+  changeSet: WorkspaceChangeSetSchema.optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime()
 });

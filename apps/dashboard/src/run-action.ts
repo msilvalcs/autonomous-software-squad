@@ -4,6 +4,7 @@ export interface RunAction {
   kind:
     | "running"
     | "resume"
+    | "approve"
     | "completed"
     | "blocked"
     | "failed"
@@ -14,16 +15,21 @@ export interface RunAction {
 
 export function getRunAction(
   run: RunState | null,
-  resuming: boolean
+  resuming: boolean,
+  approving = false
 ): RunAction | null {
   if (!run) {
     return null;
   }
 
-  if (run.active || resuming) {
+  if (run.active || resuming || approving) {
     return {
       kind: "running",
-      label: resuming ? "Retomando..." : "Executando...",
+      label: approving
+        ? "Aprovando..."
+        : resuming
+          ? "Retomando..."
+          : "Executando...",
       disabled: true
     };
   }
@@ -32,6 +38,14 @@ export function getRunAction(
     return {
       kind: "completed",
       label: "Ver resultado",
+      disabled: false
+    };
+  }
+
+  if (run.status === "AWAITING_APPROVAL") {
+    return {
+      kind: "approve",
+      label: "Aprovar mudanças",
       disabled: false
     };
   }

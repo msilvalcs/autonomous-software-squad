@@ -815,6 +815,16 @@ button:disabled {
   padding-left: 20px;
 }
 
+.repository-details pre {
+  max-height: 420px;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 8px;
+  background: #060a12;
+  white-space: pre;
+  font-size: 0.78rem;
+}
+
 @media (max-width: 520px) {
   .repository-source,
   .repository-details {

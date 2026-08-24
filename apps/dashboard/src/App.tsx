@@ -7,6 +7,7 @@ import {
 
 import {
   cancelRun,
+  approveRun,
   createRun,
   getArtifact,
   getDocumentation,
@@ -30,6 +31,7 @@ import { getRunAction } from "./run-action";
 import "./App.css";
 
 const terminalStatuses: RunStatus[] = [
+  "AWAITING_APPROVAL",
   "COMPLETED",
   "BLOCKED",
   "FAILED",
@@ -62,6 +64,7 @@ function App() {
   const [artifact, setArtifact] = useState<ArtifactManifest | null>(null);
   const [runHistory, setRunHistory] = useState<RunSummary[]>([]);
   const [resuming, setResuming] = useState(false);
+  const [approving, setApproving] = useState(false);
   const [subscriptionVersion, setSubscriptionVersion] = useState(0);
 
   const refreshHistory = useCallback(async () => {
@@ -325,6 +328,23 @@ function App() {
     }
   }
 
+  async function handleApprove() {
+    if (!runId) return;
+    try {
+      setApproving(true);
+      setError("");
+      await approveRun(runId);
+      const [state] = await Promise.all([getRun(runId), refreshHistory()]);
+      setRun(state);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error
+        ? caughtError.message
+        : "Erro ao aprovar as mudanças.");
+    } finally {
+      setApproving(false);
+    }
+  }
+
   const finished =
     run !== null &&
     terminalStatuses.includes(run.status);
@@ -351,7 +371,7 @@ function App() {
     (document) => document.id === selectedDocumentId
   );
   const hasActiveRun = runHistory.some((item) => item.active);
-  const runAction = getRunAction(run, resuming);
+  const runAction = getRunAction(run, resuming, approving);
   const visibleArtifact = artifact?.runId === runId
     ? artifact
     : null;
@@ -361,6 +381,11 @@ function App() {
   function handleRunAction() {
     if (runAction?.kind === "resume") {
       void handleResume();
+      return;
+    }
+
+    if (runAction?.kind === "approve") {
+      void handleApprove();
       return;
     }
 
@@ -787,6 +812,8 @@ function App() {
               <h2>
                 {run.status === "COMPLETED"
                   ? "Aplicação concluída"
+                  : run.status === "AWAITING_APPROVAL"
+                    ? "Mudanças aguardando aprovação"
                   : "Execução encerrada"}
               </h2>
             </div>
@@ -955,6 +982,23 @@ function App() {
             <p>
               Status final: <strong>{run.status}</strong>
             </p>
+          )}
+
+          {run.changeSet && (
+            <section className="repository-details">
+              <h3>Mudanças para aprovação</h3>
+              <ul>
+                {run.changeSet.files.map((file) => (
+                  <li key={`${file.status}-${file.path}`}>
+                    <strong>{file.status}</strong> <code>{file.path}</code>
+                  </li>
+                ))}
+              </ul>
+              <details open>
+                <summary>Diff Git{run.changeSet.truncated ? " (truncado)" : ""}</summary>
+                <pre>{run.changeSet.patch || "Nenhuma alteração detectada."}</pre>
+              </details>
+            </section>
           )}
         </section>
       )}

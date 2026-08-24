@@ -41,6 +41,16 @@ export interface OrchestratorDependencies {
   routingPolicy?: ModelRoutingPolicy;
   isolationPolicy?: IsolationPolicy;
   storyPublisher?: StoryPublisher;
+  changeInspector?: {
+    inspect(workspace: string): Promise<{
+      files: Array<{
+        path: string;
+        status: "ADDED" | "MODIFIED" | "DELETED" | "RENAMED" | "UNTRACKED";
+      }>;
+      patch: string;
+      truncated: boolean;
+    }>;
+  };
 }
 
 export interface StoryPublisher {
@@ -327,7 +337,7 @@ export function canResumeRun(
   state: RunState,
   events: AuditEvent[]
 ): boolean {
-  if (["COMPLETED", "BLOCKED"].includes(state.status)) {
+  if (["AWAITING_APPROVAL", "COMPLETED", "BLOCKED"].includes(state.status)) {
     return false;
   }
 
@@ -501,6 +511,29 @@ export class Orchestrator {
     }
 
     return this.run(state, true, signal);
+  }
+
+  async approve(state: RunState): Promise<RunState> {
+    if (state.status !== "AWAITING_APPROVAL" || !state.repositorySource) {
+      throw new Error(`Run ${state.runId} is not awaiting approval`);
+    }
+    await this.changeStatus(state, "COMPLETED");
+    await this.recordEvent(state, {
+      actor: "CLIENT",
+      action: "CHANGESET_APPROVED",
+      message: "O conjunto de mudanças foi aprovado pelo usuário.",
+      metadata: {
+        files: state.changeSet?.files.length ?? 0,
+        patchTruncated: state.changeSet?.truncated ?? false
+      }
+    });
+    await this.recordEvent(state, {
+      actor: "ORCHESTRATOR",
+      action: "RUN_COMPLETED",
+      message: "Todas as stories e o conjunto de mudanças foram aprovados."
+    });
+    await this.persistState(state);
+    return state;
   }
 
   private async run(
@@ -870,6 +903,24 @@ export class Orchestrator {
       }
 
       state.currentStoryId = null;
+      if (state.repositorySource && this.dependencies.changeInspector) {
+        state.changeSet = await this.dependencies.changeInspector.inspect(
+          state.workspacePath
+        );
+        await this.changeStatus(state, "AWAITING_APPROVAL");
+        await this.recordEvent(state, {
+          actor: "ORCHESTRATOR",
+          action: "CHANGESET_CREATED",
+          message: "Diff Git gerado e aguardando aprovação do usuário.",
+          metadata: {
+            files: state.changeSet.files,
+            patchTruncated: state.changeSet.truncated
+          }
+        });
+        await this.persistState(state);
+        return state;
+      }
+
       await this.changeStatus(state, "COMPLETED");
 
       await this.recordEvent(state, {

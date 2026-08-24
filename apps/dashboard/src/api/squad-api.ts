@@ -91,6 +91,17 @@ export async function resumeRun(
   return response.json() as Promise<CreateRunResponse>;
 }
 
+export async function approveRun(runId: string): Promise<RunState> {
+  const response = await fetch(
+    `${API_BASE_URL}/runs/${runId}/approve`,
+    { method: "POST" }
+  );
+  if (!response.ok) {
+    throw new Error("Não foi possível aprovar o conjunto de mudanças.");
+  }
+  return response.json() as Promise<RunState>;
+}
+
 export async function cancelRun(
   runId: string
 ): Promise<{ ok: boolean; runId: string; status: RunStatus }> {

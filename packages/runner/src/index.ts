@@ -567,6 +567,16 @@ export class DockerRunner implements ExecutionRunner, StructuredExecutionRunner 
     const containerName = createContainerName(workspace);
     const relativeCwd = path.relative(workspace, workingDirectory) || ".";
     const network = command.networkAccess === "install-only" ? this.installNetwork : "none";
+    const managedContainer = this.environments.get(workspace);
+    if (managedContainer) {
+      return this.runStructuredInManagedContainer(
+        workspace,
+        command,
+        relativeCwd,
+        timeoutMs,
+        managedContainer
+      );
+    }
     const args = [
       "run",
       "--rm",
@@ -607,6 +617,80 @@ export class DockerRunner implements ExecutionRunner, StructuredExecutionRunner 
     throw new Error(
       `No Docker runtime image configured for detected languages: ${profile.languages.join(", ")}`
     );
+  }
+
+  private async runStructuredInManagedContainer(
+    workspace: string,
+    command: ProjectCommand,
+    relativeCwd: string,
+    timeoutMs: number,
+    containerName: string
+  ): Promise<ExecutionResult> {
+    const needsNetwork = command.networkAccess === "install-only";
+    const hasNetwork = this.networkConnectedWorkspaces.has(workspace);
+    if (needsNetwork && !hasNetwork) {
+      await runControlCommand(
+        this.dockerBinary,
+        ["network", "connect", this.installNetwork, containerName],
+        workspace
+      );
+      this.networkConnectedWorkspaces.add(workspace);
+    }
+    if (!needsNetwork && hasNetwork) {
+      await runControlCommand(
+        this.dockerBinary,
+        ["network", "disconnect", this.installNetwork, containerName],
+        workspace
+      );
+      this.networkConnectedWorkspaces.delete(workspace);
+    }
+
+    try {
+      const userId = process.getuid?.() ?? 1000;
+      const groupId = process.getgid?.() ?? 1000;
+      return await runDockerProcess({
+        dockerBinary: this.dockerBinary,
+        args: [
+          "exec",
+          "--user",
+          `${userId}:${groupId}`,
+          "--workdir",
+          `/workspace/${relativeCwd}`,
+          "--env",
+          "CI=true",
+          "--env",
+          "HOME=/tmp",
+          containerName,
+          command.executable,
+          ...command.args
+        ],
+        workspace,
+        request: {
+          command: [command.executable, ...command.args].join(" "),
+          timeoutMs
+        },
+        onTimeout: async () => {
+          this.environments.delete(workspace);
+          this.imageDigests.delete(workspace);
+          this.workspaceImages.delete(workspace);
+          this.networkConnectedWorkspaces.delete(workspace);
+          await removeContainer(this.dockerBinary, containerName);
+        }
+      });
+    } finally {
+      if (
+        needsNetwork &&
+        this.environments.has(workspace) &&
+        this.networkConnectedWorkspaces.has(workspace)
+      ) {
+        await runControlCommand(
+          this.dockerBinary,
+          ["network", "disconnect", this.installNetwork, containerName],
+          workspace
+        );
+        this.networkConnectedWorkspaces.delete(workspace);
+      }
+    }
   }
 
   private containerSecurityArguments(
@@ -1134,7 +1218,12 @@ interface RunDockerProcessInput {
   dockerBinary: string;
   args: string[];
   workspace: string;
-  request: ExecutionRequest;
+  request: {
+    workspace?: string;
+    command: string;
+    timeoutMs: number;
+    signal?: AbortSignal;
+  };
   onTimeout: () => Promise<void>;
 }
 
@@ -1388,6 +1477,13 @@ export class WorkspaceManager {
           { recursive: true }
         );
       }
+      if (parsed.data.type === "local") {
+        await initializeGitBaseline(
+          this.gitBinary,
+          destination,
+          this.cloneTimeoutMs
+        );
+      }
     } catch (error) {
       await rm(destination, { recursive: true, force: true });
       throw error;
@@ -1395,6 +1491,88 @@ export class WorkspaceManager {
 
     return destination;
   }
+}
+
+export interface WorkspaceChange {
+  path: string;
+  status: "ADDED" | "MODIFIED" | "DELETED" | "RENAMED" | "UNTRACKED";
+}
+
+export interface WorkspaceChangeSet {
+  files: WorkspaceChange[];
+  patch: string;
+  truncated: boolean;
+}
+
+export class GitChangeInspector {
+  private readonly baseDirectory: string;
+
+  constructor(
+    baseDirectory: string,
+    private readonly gitBinary = "git",
+    private readonly maxPatchBytes = 200_000
+  ) {
+    this.baseDirectory = path.resolve(baseDirectory);
+  }
+
+  async inspect(workspace: string): Promise<WorkspaceChangeSet> {
+    const resolvedWorkspace = await ensureRealWorkspace(
+      this.baseDirectory,
+      resolveAllowedWorkspace(this.baseDirectory, workspace)
+    );
+    const statusOutput = await runGitWorkspaceCommand(
+      this.gitBinary,
+      ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+      resolvedWorkspace
+    );
+    const records = statusOutput.stdout.split("\0").filter(Boolean);
+    const files: WorkspaceChange[] = [];
+    for (let index = 0; index < records.length; index += 1) {
+      const record = records[index] ?? "";
+      const porcelainStatus = record.slice(0, 2);
+      const filePath = record.slice(3).replaceAll("\\", "/");
+      files.push({ path: filePath, status: normalizeGitStatus(porcelainStatus) });
+      if (porcelainStatus.includes("R") || porcelainStatus.includes("C")) {
+        index += 1;
+      }
+    }
+
+    let patch = (await runGitWorkspaceCommand(
+      this.gitBinary,
+      ["diff", "--no-ext-diff", "--binary", "--"],
+      resolvedWorkspace
+    )).stdout;
+    for (const file of files.filter((entry) => entry.status === "UNTRACKED")) {
+      const untracked = await runGitWorkspaceCommand(
+        this.gitBinary,
+        ["diff", "--no-index", "--binary", "--", "/dev/null", file.path],
+        resolvedWorkspace,
+        [0, 1]
+      );
+      patch += untracked.stdout;
+    }
+
+    const patchBytes = Buffer.from(patch);
+    const truncated = patchBytes.length > this.maxPatchBytes;
+    return {
+      files,
+      patch: truncated
+        ? patchBytes.subarray(0, this.maxPatchBytes).toString("utf8")
+        : patch,
+      truncated
+    };
+  }
+}
+
+function normalizeGitStatus(
+  status: string
+): WorkspaceChange["status"] {
+  if (status === "??") return "UNTRACKED";
+  if (status.includes("R") || status.includes("C")) return "RENAMED";
+  if (status.includes("D")) return "DELETED";
+  if (status[1] === "M") return "MODIFIED";
+  if (status[0] === "A") return status[1] === "M" ? "MODIFIED" : "ADDED";
+  return "MODIFIED";
 }
 
 function shouldCopyPath(source: string): boolean {
@@ -1445,6 +1623,75 @@ async function cloneRepository(
             )
           );
         }
+      }
+    });
+  });
+}
+
+async function initializeGitBaseline(
+  gitBinary: string,
+  workspace: string,
+  timeoutMs: number
+): Promise<void> {
+  await runGitWorkspaceCommand(
+    gitBinary,
+    ["init", "--quiet"],
+    workspace,
+    [0],
+    timeoutMs
+  );
+  await runGitWorkspaceCommand(
+    gitBinary,
+    ["add", "--all", "--"],
+    workspace,
+    [0],
+    timeoutMs
+  );
+}
+
+async function runGitWorkspaceCommand(
+  gitBinary: string,
+  args: string[],
+  cwd: string,
+  acceptedExitCodes = [0],
+  timeoutMs = 120_000
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const child = spawn(gitBinary, args, {
+      cwd,
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill("SIGTERM");
+      reject(new Error("Git workspace command timed out"));
+    }, timeoutMs);
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", () => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeout);
+        reject(new Error("Git workspace command failed"));
+      }
+    });
+    child.on("close", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (code !== null && acceptedExitCodes.includes(code)) {
+        resolve({ stdout, stderr });
+      } else {
+        reject(new Error(`Git workspace command failed with exit code ${code ?? "unknown"}`));
       }
     });
   });

@@ -372,6 +372,8 @@ Regras obrigatorias:
 - Nao leia nem altere credenciais, .env ou arquivos fora do projeto.
 - Adicione ou atualize testes para o comportamento implementado.
 - Nao execute comandos destrutivos.
+- Nao execute git add, git commit, git push ou altere o indice Git. A entrega
+  e a aprovacao do diff pertencem ao Orquestrador.
 - Em commands, solicite somente identificadores presentes nesta lista:
   ${JSON.stringify(allowedCommands)}.
 - Esses identificadores referenciam os comandos estruturados detectados no

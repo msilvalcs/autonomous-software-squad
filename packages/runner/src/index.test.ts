@@ -16,6 +16,7 @@ import {
   assessFirecrackerReadiness,
   createExecutionRunner,
   DockerRunner,
+  GitChangeInspector,
   LocalRunner,
   MicroVmRunner,
   WorkspaceManager,
@@ -320,6 +321,19 @@ describe("DockerRunner", () => {
       commands: {},
       detectedFiles: ["pyproject.toml"]
     });
+    const pythonCommand: ProjectCommand = {
+      executable: "python3",
+      args: ["--version"],
+      purpose: "test",
+      workingDirectory: ".",
+      networkAccess: "none",
+      timeoutMs: 10_000
+    };
+    const execution = await runner.runProjectCommand({
+      workspace,
+      command: pythonCommand,
+      approvedCommands: [pythonCommand]
+    });
     await runner.dispose(workspace);
 
     const calls = (await readFile(invocationLog, "utf8"))
@@ -327,8 +341,12 @@ describe("DockerRunner", () => {
       .split("\n")
       .map((line) => JSON.parse(line) as string[]);
     expect(environment.image).toBe("squad-python:test");
+    expect(execution.exitCode).toBe(0);
     expect(calls[0]).toContain("squad-python:test");
     expect(calls[0]?.slice(-3)).toEqual(["tail", "-f", "/dev/null"]);
+    expect(calls.some((call) =>
+      call[0] === "exec" && call.slice(-2).join(" ") === "python3 --version"
+    )).toBe(true);
   });
 
   it("falha fechado quando nenhuma imagem cobre a stack detectada", async () => {
@@ -821,7 +839,17 @@ describe("WorkspaceManager", () => {
     expect(await readFile(path.join(source, "README.md"), "utf8")).toBe("original");
     await expect(access(path.join(destination, "node_modules"))).rejects.toThrow();
     await expect(access(path.join(destination, "dist"))).rejects.toThrow();
-    await expect(access(path.join(destination, ".git"))).rejects.toThrow();
+    await access(path.join(destination, ".git"));
+    await writeFile(path.join(destination, "added.txt"), "new", "utf8");
+    const changeSet = await new GitChangeInspector(
+      path.join(root, "generated")
+    ).inspect(destination);
+    expect(changeSet.files).toEqual(expect.arrayContaining([
+      { path: "README.md", status: "MODIFIED" },
+      { path: "added.txt", status: "UNTRACKED" }
+    ]));
+    expect(changeSet.patch).toContain("changed");
+    expect(changeSet.patch).toContain("added.txt");
   });
 
   it("rejeita fonte local ausente, arquivo e symlink", async () => {

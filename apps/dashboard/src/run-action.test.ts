@@ -57,6 +57,17 @@ describe("getRunAction", () => {
     });
   });
 
+  it("solicita aprovação quando o diff está pronto", () => {
+    expect(getRunAction(runState({
+      status: "AWAITING_APPROVAL",
+      canResume: false
+    }), false)).toMatchObject({
+      kind: "approve",
+      label: "Aprovar mudanças",
+      disabled: false
+    });
+  });
+
   it("desabilita a ação quando o limite de tentativas foi atingido", () => {
     expect(getRunAction(runState({
       status: "BLOCKED",

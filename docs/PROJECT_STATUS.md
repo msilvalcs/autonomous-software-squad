@@ -163,6 +163,8 @@ também os testes Playwright dentro da imagem provisionada.
   Workspace Manager -> Project Analyzer -> LocalRunner estruturado.
 - [x] Validar uma run E2E real de repositório Node até COMPLETED, com eventos
   REPOSITORY_ANALYZED, BUILD_COMPLETED e TESTS_COMPLETED.
+- [x] Gerar diff Git auditável e exigir aprovação explícita antes de concluir
+  uma run baseada em repositório.
 
 ### P0 - Fechar a entrega atual
 

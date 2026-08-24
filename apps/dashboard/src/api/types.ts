@@ -3,6 +3,7 @@ export type RunStatus =
   | "PLANNING"
   | "DEVELOPING"
   | "TESTING"
+  | "AWAITING_APPROVAL"
   | "COMPLETED"
   | "BLOCKED"
   | "FAILED"
@@ -48,6 +49,14 @@ export interface RunState {
   canResume: boolean;
   repositorySource?: RepositorySource;
   profile?: ProjectProfile;
+  changeSet?: {
+    files: Array<{
+      path: string;
+      status: "ADDED" | "MODIFIED" | "DELETED" | "RENAMED" | "UNTRACKED";
+    }>;
+    patch: string;
+    truncated: boolean;
+  };
 }
 
 export type RepositorySource =
