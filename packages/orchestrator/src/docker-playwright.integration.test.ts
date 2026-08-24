@@ -71,7 +71,7 @@ runDockerIntegration(
 
       expect(command).toBe("npm run test:e2e");
       expect(requests[0]?.prompt).toContain(
-        "Somente o resultado retornado pelo Runner determina se build"
+        "O Runner executa as validacoes solicitadas"
       );
 
       const runner = new DockerRunner({
