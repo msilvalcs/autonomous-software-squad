@@ -85,13 +85,39 @@ const workspaceManager = new WorkspaceManager({
 });
 const projectAnalyzer = new ProjectAnalyzer();
 
+const dockerRuntimeImages = [
+  {
+    image: process.env.DOCKER_RUNNER_PYTHON_IMAGE,
+    languages: ["JavaScript", "TypeScript", "Python"]
+  },
+  {
+    image: process.env.DOCKER_RUNNER_GO_IMAGE,
+    languages: ["JavaScript", "TypeScript", "Go"]
+  },
+  {
+    image: process.env.DOCKER_RUNNER_JVM_IMAGE,
+    languages: ["JavaScript", "TypeScript", "Java", "Kotlin"]
+  },
+  {
+    image: process.env.DOCKER_RUNNER_DOTNET_IMAGE,
+    languages: ["JavaScript", "TypeScript", "C#", "F#"]
+  },
+  {
+    image: process.env.DOCKER_RUNNER_RUST_IMAGE,
+    languages: ["JavaScript", "TypeScript", "Rust"]
+  }
+].filter((candidate): candidate is { image: string; languages: string[] } =>
+  typeof candidate.image === "string" && candidate.image.trim() !== ""
+);
+
 const runner = createExecutionRunner({
   mode: process.env.EXECUTION_MODE,
   baseDirectory: generatedProjectsDirectory,
   docker: {
     image:
       process.env.DOCKER_RUNNER_IMAGE ??
-      "autonomous-squad-runner:local"
+      "autonomous-squad-runner:local",
+    runtimeImages: dockerRuntimeImages
   },
   microvm: {
     firecrackerBinary: process.env.FIRECRACKER_BINARY,

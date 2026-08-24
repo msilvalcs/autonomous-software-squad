@@ -68,6 +68,22 @@ jobs:
           --tag autonomous-squad-runner:ci
           .
 
+      - name: Build Python runner image
+        run: >-
+          docker build
+          --file docker/runner.python.Dockerfile
+          --build-arg BASE_IMAGE=autonomous-squad-runner:ci
+          --tag autonomous-squad-runner-python:ci
+          .
+
+      - name: Build Go runner image
+        run: >-
+          docker build
+          --file docker/runner.go.Dockerfile
+          --build-arg BASE_IMAGE=autonomous-squad-runner:ci
+          --tag autonomous-squad-runner-go:ci
+          .
+
       - name: Install template dependencies
         run: npm ci --prefix templates/react-task-app
 
@@ -79,3 +95,10 @@ jobs:
           RUN_DOCKER_PLAYWRIGHT_INTEGRATION: "1"
           DOCKER_RUNNER_IMAGE: autonomous-squad-runner:ci
         run: npm run test:integration:docker -w @squad/orchestrator
+
+      - name: Validate Python and Go runtime images
+        env:
+          RUN_DOCKER_MULTISTACK: "1"
+          DOCKER_RUNNER_PYTHON_IMAGE: autonomous-squad-runner-python:ci
+          DOCKER_RUNNER_GO_IMAGE: autonomous-squad-runner-go:ci
+        run: npm run test:integration:docker -w @squad/runner

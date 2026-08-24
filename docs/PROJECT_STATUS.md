@@ -224,8 +224,9 @@ também os testes Playwright dentro da imagem provisionada.
 - uma run que atinge `maxAttempts` não pode ser retomada pela interface.
 - os perfis Python e Go possuem fixtures e detecção validadas, mas sua execução
   real é pulada em ambientes que não oferecem os respectivos runtimes;
-- o Docker Runner ainda usa uma imagem orientada a Node.js e precisa selecionar
-  imagens compatíveis com o perfil para isolar outras stacks.
+- o Docker Runner seleciona imagens diferenciais configuradas conforme o
+  perfil. Python e Go já possuem Dockerfiles; JVM, .NET e Rust ainda precisam
+  de homologação.
 
 ## Critério do próximo marco
 

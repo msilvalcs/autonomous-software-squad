@@ -286,6 +286,70 @@ describe("LocalRunner", () => {
 });
 
 describe("DockerRunner", () => {
+  it("seleciona uma imagem compatível com todas as linguagens detectadas", async () => {
+    const { baseDirectory, workspace } = await createWorkspace();
+    const fakeDocker = path.join(baseDirectory, "runtime-docker.mjs");
+    const invocationLog = path.join(baseDirectory, "runtime-calls.jsonl");
+    await writeFile(
+      fakeDocker,
+      [
+        "#!/usr/bin/env node",
+        "import { appendFileSync } from 'node:fs';",
+        "const args = process.argv.slice(2);",
+        `appendFileSync(${JSON.stringify(invocationLog)}, JSON.stringify(args) + '\\n');`,
+        "if (args[0] === 'inspect') console.log('sha256:python-image');"
+      ].join("\n"),
+      "utf8"
+    );
+    await chmod(fakeDocker, 0o755);
+    const runner = new DockerRunner({
+      baseDirectory,
+      dockerBinary: fakeDocker,
+      image: "squad-node:test",
+      runtimeImages: [{
+        image: "squad-python:test",
+        languages: ["JavaScript", "TypeScript", "Python"]
+      }]
+    });
+
+    const environment = await runner.prepare(workspace, {
+      languages: ["Python"],
+      frameworks: [],
+      packageManagers: ["pip"],
+      isMonorepo: false,
+      commands: {},
+      detectedFiles: ["pyproject.toml"]
+    });
+    await runner.dispose(workspace);
+
+    const calls = (await readFile(invocationLog, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as string[]);
+    expect(environment.image).toBe("squad-python:test");
+    expect(calls[0]).toContain("squad-python:test");
+    expect(calls[0]?.slice(-3)).toEqual(["tail", "-f", "/dev/null"]);
+  });
+
+  it("falha fechado quando nenhuma imagem cobre a stack detectada", async () => {
+    const { baseDirectory, workspace } = await createWorkspace();
+    const runner = new DockerRunner({
+      baseDirectory,
+      image: "squad-node:test"
+    });
+
+    await expect(runner.prepare(workspace, {
+      languages: ["Go"],
+      frameworks: [],
+      packageManagers: ["Go modules"],
+      isMonorepo: false,
+      commands: {},
+      detectedFiles: ["go.mod"]
+    })).rejects.toThrow(
+      "No Docker runtime image configured for detected languages: Go"
+    );
+  });
+
   it("reutiliza um container durante o ciclo de vida da run", async () => {
     const { baseDirectory, workspace } =
       await createWorkspace();

@@ -16,6 +16,7 @@ import {
   ProjectCommandSchema,
   RepositorySourceSchema,
   type ProjectCommand,
+  type ProjectProfile,
   type RepositorySource
 } from "@squad/schemas";
 
@@ -82,7 +83,10 @@ export interface RunnerExecutionPolicy {
 export interface ExecutionRunner {
   readonly backend: ExecutionBackend;
   readonly policy: RunnerExecutionPolicy;
-  prepare(workspace: string): Promise<ExecutionEnvironment>;
+  prepare(
+    workspace: string,
+    profile?: ProjectProfile
+  ): Promise<ExecutionEnvironment>;
   run(request: ExecutionRequest): Promise<ExecutionResult>;
   dispose(workspace: string): Promise<void>;
 }
@@ -314,6 +318,14 @@ export interface DockerRunnerOptions {
   memoryLimit?: string;
   pidsLimit?: number;
   installNetwork?: string;
+  runtimeImages?: Array<{
+    image: string;
+    languages: string[];
+  }>;
+}
+
+function normalizeLanguage(language: string): string {
+  return language.trim().toLowerCase();
 }
 
 export class DockerRunner implements ExecutionRunner, StructuredExecutionRunner {
@@ -325,8 +337,13 @@ export class DockerRunner implements ExecutionRunner, StructuredExecutionRunner 
   private readonly memoryLimit: string;
   private readonly pidsLimit: number;
   private readonly installNetwork: string;
+  private readonly runtimeImages: Array<{
+    image: string;
+    languages: Set<string>;
+  }>;
   private readonly environments = new Map<string, string>();
   private readonly imageDigests = new Map<string, string>();
+  private readonly workspaceImages = new Map<string, string>();
   private readonly networkConnectedWorkspaces = new Set<string>();
 
   get policy(): RunnerExecutionPolicy {
@@ -355,6 +372,10 @@ export class DockerRunner implements ExecutionRunner, StructuredExecutionRunner 
     this.memoryLimit = options.memoryLimit ?? "1g";
     this.pidsLimit = options.pidsLimit ?? 256;
     this.installNetwork = options.installNetwork ?? "bridge";
+    this.runtimeImages = (options.runtimeImages ?? []).map((candidate) => ({
+      image: candidate.image,
+      languages: new Set(candidate.languages.map(normalizeLanguage))
+    }));
 
     if (!Number.isFinite(this.cpuLimit) || this.cpuLimit <= 0) {
       throw new Error("Docker CPU limit must be greater than zero");
@@ -367,9 +388,18 @@ export class DockerRunner implements ExecutionRunner, StructuredExecutionRunner 
     if (this.image.trim() === "" || this.memoryLimit.trim() === "") {
       throw new Error("Docker image and memory limit are required");
     }
+
+    if (this.runtimeImages.some(
+      (candidate) => candidate.image.trim() === "" || candidate.languages.size === 0
+    )) {
+      throw new Error("Docker runtime images require an image and at least one language");
+    }
   }
 
-  async prepare(workspace: string): Promise<ExecutionEnvironment> {
+  async prepare(
+    workspace: string,
+    profile?: ProjectProfile
+  ): Promise<ExecutionEnvironment> {
     const resolvedWorkspace = resolveAllowedWorkspace(
       this.baseDirectory,
       workspace
@@ -380,11 +410,12 @@ export class DockerRunner implements ExecutionRunner, StructuredExecutionRunner 
       return {
         backend: this.backend,
         environmentId: existing,
-        image: this.image,
+        image: this.workspaceImages.get(resolvedWorkspace) ?? this.image,
         imageDigest: this.imageDigests.get(resolvedWorkspace)
       };
     }
 
+    const selectedImage = this.selectImage(profile);
     const containerName = createContainerName(resolvedWorkspace);
     const args = [
       "run",
@@ -394,10 +425,10 @@ export class DockerRunner implements ExecutionRunner, StructuredExecutionRunner 
         containerName,
         this.installNetwork
       ),
-      this.image,
-      "node",
-      "-e",
-      "setInterval(() => {}, 2147483647)"
+      selectedImage,
+      "tail",
+      "-f",
+      "/dev/null"
     ];
 
     let imageDigest: string | undefined;
@@ -424,6 +455,7 @@ export class DockerRunner implements ExecutionRunner, StructuredExecutionRunner 
     }
 
     this.environments.set(resolvedWorkspace, containerName);
+    this.workspaceImages.set(resolvedWorkspace, selectedImage);
     this.networkConnectedWorkspaces.add(resolvedWorkspace);
 
     if (imageDigest) {
@@ -433,7 +465,7 @@ export class DockerRunner implements ExecutionRunner, StructuredExecutionRunner 
     return {
       backend: this.backend,
       environmentId: containerName,
-      image: this.image,
+      image: selectedImage,
       imageDigest
     };
   }
@@ -452,6 +484,7 @@ export class DockerRunner implements ExecutionRunner, StructuredExecutionRunner 
     await removeContainer(this.dockerBinary, containerName, true);
     this.environments.delete(resolvedWorkspace);
     this.imageDigests.delete(resolvedWorkspace);
+    this.workspaceImages.delete(resolvedWorkspace);
     this.networkConnectedWorkspaces.delete(resolvedWorkspace);
   }
 
@@ -498,7 +531,7 @@ export class DockerRunner implements ExecutionRunner, StructuredExecutionRunner 
         containerName,
         network
       ),
-      this.image,
+      this.workspaceImages.get(workspace) ?? this.image,
       "npm",
       ...command
     ];
@@ -540,7 +573,7 @@ export class DockerRunner implements ExecutionRunner, StructuredExecutionRunner 
       ...this.containerSecurityArguments(workspace, containerName, network),
       "--workdir",
       "/workspace/" + relativeCwd,
-      this.image,
+      this.workspaceImages.get(workspace) ?? this.image,
       command.executable,
       ...command.args
     ];
@@ -551,6 +584,29 @@ export class DockerRunner implements ExecutionRunner, StructuredExecutionRunner 
       request: { workspace, command: "npm test", timeoutMs },
       onTimeout: () => removeContainer(this.dockerBinary, containerName)
     });
+  }
+
+  private selectImage(profile?: ProjectProfile): string {
+    if (!profile || profile.languages.length === 0) {
+      return this.image;
+    }
+
+    const required = new Set(profile.languages.map(normalizeLanguage));
+    const defaultLanguages = new Set(["javascript", "typescript"]);
+    if ([...required].every((language) => defaultLanguages.has(language))) {
+      return this.image;
+    }
+
+    const candidate = this.runtimeImages.find((runtime) =>
+      [...required].every((language) => runtime.languages.has(language))
+    );
+    if (candidate) {
+      return candidate.image;
+    }
+
+    throw new Error(
+      `No Docker runtime image configured for detected languages: ${profile.languages.join(", ")}`
+    );
   }
 
   private containerSecurityArguments(

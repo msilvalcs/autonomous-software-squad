@@ -541,7 +541,8 @@ export class Orchestrator {
 
       try {
         environment = await this.dependencies.runner.prepare(
-          state.workspacePath
+          state.workspacePath,
+          state.profile
         );
       } catch (error) {
         await this.recordEvent(state, {

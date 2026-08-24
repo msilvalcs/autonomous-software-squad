@@ -414,6 +414,28 @@ EXECUTION_MODE=docker
 DOCKER_RUNNER_IMAGE=autonomous-squad-runner:local
 ```
 
+Para repositórios Python e Go, construa as imagens diferenciais sobre a mesma
+base e configure suas tags:
+
+```bash
+docker build --file docker/runner.python.Dockerfile \
+  --build-arg BASE_IMAGE=autonomous-squad-runner:local \
+  --tag autonomous-squad-runner-python:local .
+docker build --file docker/runner.go.Dockerfile \
+  --build-arg BASE_IMAGE=autonomous-squad-runner:local \
+  --tag autonomous-squad-runner-go:local .
+```
+
+```env
+DOCKER_RUNNER_PYTHON_IMAGE=autonomous-squad-runner-python:local
+DOCKER_RUNNER_GO_IMAGE=autonomous-squad-runner-go:local
+```
+
+O Runner escolhe somente uma imagem que cubra todas as linguagens detectadas.
+Se nenhuma imagem configurada for compatível, a preparação falha sem fallback
+para o host. JVM, .NET e Rust usam as variáveis equivalentes documentadas em
+`.env.example` depois que suas imagens forem homologadas.
+
 O DockerRunner monta somente o workspace validado, executa sem root, remove
 capabilities, impede novos privilégios, aplica limites de CPU, memória e PIDs e
 usa root filesystem somente leitura. Build, typecheck e testes ficam sem rede;
