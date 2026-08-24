@@ -221,13 +221,90 @@ describe("agentes simulados", () => {
     });
     const request = requests[0] as { prompt: string };
     expect(request.prompt).toContain(
-      "Nao execute npm, Playwright ou outros comandos dependentes do ambiente no"
+      "Nao execute npm, Playwright ou outros comandos dependentes do ambiente"
     );
     expect(request.prompt).toContain(
-      "Somente o resultado retornado pelo Runner determina se build"
+      "O Runner executa as validacoes solicitadas"
     );
     expect(request.prompt).toContain(
       "solicite npm run test:e2e"
+    );
+  });
+
+  it("o Developer solicita somente validações detectadas para a stack", async () => {
+    const requests: Array<{
+      prompt: string;
+      outputSchema: {
+        properties: { commands: { items: { enum: string[] } } };
+      };
+    }> = [];
+    const client = {
+      generate: async (request: typeof requests[number]) => {
+        requests.push(request);
+        return {
+          data: {
+            storyId: "US-001",
+            summary: "Implementação Go concluída.",
+            changedFiles: ["main.go"],
+            commands: ["test", "build"],
+            status: "IMPLEMENTED",
+            decisions: [{
+              decision: "Preservar a stack detectada.",
+              rationale: "O repositório usa Go.",
+              alternativesConsidered: []
+            }]
+          },
+          stdout: "",
+          stderr: "",
+          durationMs: 1
+        };
+      }
+    };
+    const story = (await new MockProductOwnerAgent().createBacklog(
+      "Aplicacao"
+    )).stories[0];
+
+    if (!story) {
+      throw new Error("Story was not created");
+    }
+
+    const result = await new CodexDeveloperAgent(client as never).implement({
+      story,
+      previousQaResult: null,
+      workspacePath,
+      profile: {
+        languages: ["Go"],
+        frameworks: [],
+        packageManagers: ["Go modules"],
+        isMonorepo: false,
+        commands: {
+          test: {
+            executable: "go",
+            args: ["test", "./..."],
+            purpose: "test",
+            workingDirectory: ".",
+            networkAccess: "none",
+            timeoutMs: 120_000
+          },
+          build: {
+            executable: "go",
+            args: ["build", "./..."],
+            purpose: "build",
+            workingDirectory: ".",
+            networkAccess: "none",
+            timeoutMs: 120_000
+          }
+        },
+        detectedFiles: ["go.mod"]
+      }
+    });
+
+    expect(result.commands).toEqual(["test", "build"]);
+    expect(
+      requests[0]?.outputSchema.properties.commands.items.enum
+    ).toEqual(["test", "build"]);
+    expect(requests[0]?.prompt).not.toContain(
+      "Os unicos comandos que podem ser solicitados"
     );
   });
 

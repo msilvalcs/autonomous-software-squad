@@ -45,4 +45,14 @@ e registra comandos ausentes como `VALIDATION_COMMAND_SKIPPED`.
 ### Integração de fronteira
 
 A API usa um helper validado para normalizar
-epositorySource; o dashboard usa contratos e helpers puros para manter o formulário testável sem acoplamento ao React.
+`repositorySource`; o dashboard usa contratos e helpers puros para manter o
+formulário testável sem acoplamento ao React.
+
+### Contrato do Developer
+
+No modo repositório, o Developer solicita validações por propósito (`lint`,
+`typecheck`, `test` ou `build`) e somente quando o propósito existe no perfil
+detectado. O agente não inventa executáveis nem argumentos. O Orquestrador
+resolve o propósito para o `ProjectCommand` aprovado e o Runner executa os
+campos estruturados sem shell. O modo template preserva temporariamente os
+identificadores npm legados para compatibilidade.

@@ -109,47 +109,63 @@ const backlogOutputSchema: Record<string, unknown> = {
   }
 };
 
-const developerOutputSchema: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  required: [
-    "storyId",
-    "summary",
-    "changedFiles",
-    "commands",
-    "status",
-    "decisions"
-  ],
-  properties: {
-    storyId: { type: "string" },
-    summary: { type: "string", minLength: 1 },
-    changedFiles: {
-      type: "array",
-      items: { type: "string", minLength: 1 }
-    },
-    commands: {
-      type: "array",
-      items: {
+const legacyDeveloperCommands = [
+  "npm install",
+  "npm run build",
+  "npm test",
+  "npm run test:e2e",
+  "npm run typecheck"
+] as const;
+
+function developerOutputSchema(
+  allowedCommands: readonly string[]
+): Record<string, unknown> {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "storyId",
+      "summary",
+      "changedFiles",
+      "commands",
+      "status",
+      "decisions"
+    ],
+    properties: {
+      storyId: { type: "string" },
+      summary: { type: "string", minLength: 1 },
+      changedFiles: {
+        type: "array",
+        items: { type: "string", minLength: 1 }
+      },
+      commands: {
+        type: "array",
+        maxItems: allowedCommands.length,
+        items: allowedCommands.length > 0
+          ? { type: "string", enum: [...allowedCommands] }
+          : { type: "string", maxLength: 0 }
+      },
+      status: {
         type: "string",
-        enum: [
-          "npm install",
-          "npm run build",
-          "npm test",
-          "npm run test:e2e",
-          "npm run typecheck"
-        ]
+        enum: ["IMPLEMENTED", "FAILED"]
+      },
+      decisions: {
+        type: "array",
+        items: agentDecisionOutputSchema()
       }
-    },
-    status: {
-      type: "string",
-      enum: ["IMPLEMENTED", "FAILED"]
-    },
-    decisions: {
-      type: "array",
-      items: agentDecisionOutputSchema()
     }
+  };
+}
+
+function availableDeveloperCommands(profile?: ProjectProfile): string[] {
+  if (!profile) {
+    return [...legacyDeveloperCommands];
   }
-};
+
+  return (["lint", "typecheck", "test", "build"] as const).filter(
+    (purpose) => Boolean(profile.commands[purpose])
+  );
+}
 
 const qaOutputSchema: Record<string, unknown> = {
   type: "object",
@@ -334,6 +350,13 @@ export class CodexDeveloperAgent implements DeveloperAgent {
       throw new Error("Developer workspace cannot be empty");
     }
 
+    const allowedCommands = availableDeveloperCommands(input.profile);
+    const executionRule = input.profile
+      ? "Nao execute comandos dependentes do ambiente no host. O Runner resolve cada identificador pelo perfil detectado e seu resultado determina se a validacao passou."
+      : "Nao execute npm, Playwright ou outros comandos dependentes do ambiente no host. O Runner executa as validacoes solicitadas e seu resultado determina se elas passaram.";
+    const visualValidationRule = input.profile
+      ? "Para criterios visuais ou de interacao, adicione testes reais e solicite o identificador test somente quando ele estiver disponivel na lista."
+      : "Para criterios visuais ou de interacao, adicione testes reais em e2e e solicite npm run test:e2e. Playwright e Chromium sao provisionados no Runner.";
     const prompt = `
 ${this.persona}
 
@@ -349,14 +372,12 @@ Regras obrigatorias:
 - Nao leia nem altere credenciais, .env ou arquivos fora do projeto.
 - Adicione ou atualize testes para o comportamento implementado.
 - Nao execute comandos destrutivos.
-- Os unicos comandos que podem ser solicitados na resposta sao:
-  npm install, npm run build, npm test, npm run test:e2e e npm run typecheck.
-- Nao execute npm, Playwright ou outros comandos dependentes do ambiente no
-  host. Implemente os arquivos e informe em commands quais validacoes o Runner
-  deve executar. Somente o resultado retornado pelo Runner determina se build
-  e testes passaram.
-- Para criterios visuais ou de interacao, adicione testes reais em e2e e
-  solicite npm run test:e2e. Playwright e Chromium sao provisionados no Runner.
+- Em commands, solicite somente identificadores presentes nesta lista:
+  ${JSON.stringify(allowedCommands)}.
+- Esses identificadores referenciam os comandos estruturados detectados no
+  perfil. Nao invente executaveis, argumentos ou comandos de shell.
+- ${executionRule}
+- ${visualValidationRule}
 - Liste em changedFiles apenas caminhos relativos realmente alterados.
 - Se nao for possivel implementar com seguranca, retorne status FAILED e
   explique o motivo no summary.
@@ -376,7 +397,7 @@ ${JSON.stringify(input.profile ?? null, null, 2)}
     const result = await this.client.generate<unknown>({
       role: "DEV",
       prompt,
-      outputSchema: developerOutputSchema,
+      outputSchema: developerOutputSchema(allowedCommands),
       workingDirectory: input.workspacePath,
       sandbox: "workspace-write",
       timeoutMs: 600_000,
@@ -386,6 +407,14 @@ ${JSON.stringify(input.profile ?? null, null, 2)}
     });
 
     const implementation = DeveloperResultSchema.parse(result.data);
+    const unsupportedCommand = implementation.commands.find(
+      (command) => !allowedCommands.includes(command)
+    );
+    if (unsupportedCommand) {
+      throw new Error(
+        `Developer requested an unavailable validation: ${unsupportedCommand}`
+      );
+    }
     const changedFiles = implementation.changedFiles.map(
       validateRelativeFilePath
     );
@@ -601,7 +630,9 @@ export class MockDeveloperAgent implements DeveloperAgent {
       changedFiles: [
         `src/features/${input.story.id.toLowerCase()}.ts`
       ],
-      commands: ["npm run build", "npm test"],
+      commands: input.profile
+        ? availableDeveloperCommands(input.profile)
+        : ["npm run build", "npm test"],
       status: "IMPLEMENTED",
       decisions: [{
         decision: isCorrection
