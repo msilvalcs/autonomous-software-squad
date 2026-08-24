@@ -1,6 +1,6 @@
 # Estado do projeto e próximos passos
 
-Atualizado em: 22 de agosto de 2026
+Atualizado em: 24 de agosto de 2026
 
 ## Resumo executivo
 
@@ -10,19 +10,18 @@ Owner, Developer e QA, executa build e testes, persiste decisões e eventos e
 apresenta o progresso em tempo real no dashboard.
 
 A base publicada no GitHub está na branch
-`feat-cooperative-cancellation-and-antigravity`, no commit `ee7b94e`, com as
-seis issues da fase de isolamento concluídas. A branch já está sincronizada com
-o remoto e o CI está verde.
+`feat-cooperative-cancellation-and-antigravity`. As seis issues da fase de
+isolamento estão concluídas e a evolução para repositórios existentes está
+versionada de forma incremental.
 
 O projeto está tecnicamente avançado, mas ainda não deve ser tratado como uma
 entrega final. O próximo marco é obter uma nova run Codex concluída em Docker,
 com preview, ZIP e evidência E2E no dashboard.
 
-O direcionamento aprovado para os próximos incrementos é evoluir o sistema
-para um orquestrador agnóstico de repositórios. O ADR-012 e os contratos
-compartilhados de origem, perfil, comandos e workspace foram adicionados. O
-modo repositório já está integrado ao Orquestrador, mas ainda não à API e ao
-dashboard.
+O sistema está evoluindo para um orquestrador agnóstico de repositórios. O
+ADR-012 e os contratos compartilhados de origem, perfil, comandos e workspace
+foram adicionados. O modo repositório já está integrado ao Orquestrador, à API
+e ao dashboard.
 
 O Workspace Manager já materializa fontes locais e repositórios Git em cópias
 isoladas, com validação de caminhos, exclusão de artefatos e limpeza segura em
@@ -113,13 +112,11 @@ O limite de tentativas foi atingido. Por segurança, essa run não pode ser
 retomada novamente. O workspace e a auditoria permanecem disponíveis para
 diagnóstico, mas a comprovação final deve ocorrer em uma nova run.
 
-Uma execução posterior (
-un-bb023a78-3d96-4697-ab9a-a737ad2ebafe) revelou
+Uma execução posterior (`run-bb023a78-3d96-4697-ab9a-a737ad2ebafe`) revelou
 que o Codex Developer pode exceder o timeout de 10 minutos ao processar uma
 correção de QA. O evento foi registrado como RUN_FAILED, mas versões
 anteriores não marcavam esse tipo de falha como retomável. O Orquestrador agora
-classifica novos timeouts como CODEX_TIMEOUT com
-etryable: true, permitindo
+classifica novos timeouts como `CODEX_TIMEOUT` com `retryable: true`, permitindo
 retomada enquanto ainda houver tentativa disponível. O run histórico não foi
 alterado, preservando a auditoria; ele deve ser substituído por uma nova run.
 
@@ -162,6 +159,10 @@ também os testes Playwright dentro da imagem provisionada.
 - [x] Implementar análise somente leitura de linguagem, framework e comandos.
 - [x] Adaptar Runner, Orquestrador e agentes para consumir comandos estruturados.
 - [x] Integrar origem de repositório ao fluxo da API e do dashboard.
+- [x] Versionar fixtures mínimas de Node, Python e Go e validar o fluxo real
+  Workspace Manager -> Project Analyzer -> LocalRunner estruturado.
+- [x] Validar uma run E2E real de repositório Node até COMPLETED, com eventos
+  REPOSITORY_ANALYZED, BUILD_COMPLETED e TESTS_COMPLETED.
 
 ### P0 - Fechar a entrega atual
 
@@ -221,6 +222,10 @@ também os testes Playwright dentro da imagem provisionada.
 - não existe retomada automática após reinício da API;
 - Firecracker exige Linux/KVM e ainda não possui ciclo de vida homologado;
 - uma run que atinge `maxAttempts` não pode ser retomada pela interface.
+- os perfis Python e Go possuem fixtures e detecção validadas, mas sua execução
+  real é pulada em ambientes que não oferecem os respectivos runtimes;
+- o Docker Runner ainda usa uma imagem orientada a Node.js e precisa selecionar
+  imagens compatíveis com o perfil para isolar outras stacks.
 
 ## Critério do próximo marco
 
@@ -253,13 +258,3 @@ Atualize este arquivo ao concluir um marco, alterar um risco relevante ou obter
 uma nova run representativa. Separe sempre o estado publicado no GitHub das
 mudanças locais ainda não versionadas e use os arquivos de auditoria como fonte
 de verdade para resultados de execução.
-### Runner estruturado
-
-O pacote `runner` oferece `runProjectCommand` para executar comandos
-agnósticos de linguagem a partir de um plano aprovado, com validação Zod,
-isolamento de workspace, timeout, abort, rede limitada e ambiente sem
-credenciais. A API ainda não está integrada ao orquestrador principal.
-
-## Orquestração agnóstica - integração API/dashboard
-
-A API valida origens local/Git e o dashboard exibe a origem e o perfil detectado. O fluxo de template permanece retrocompatível.
