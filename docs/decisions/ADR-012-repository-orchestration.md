@@ -34,3 +34,9 @@ com a allowlist existente e evita tratar texto livre como shell.
 O primeiro incremento implementa os contratos, a materialização isolada de
 fontes locais e Git e o Project Analyzer somente leitura. A integração dessas
 capacidades ao Orquestrador, Runner, API e dashboard permanece pendente.
+## Estado da API estruturada do Runner
+
+O Runner possui a API `runProjectCommand`, que valida comandos contra uma
+lista de planos aprovados e executa `executable` e `args` sem shell. Ela cobre
+LocalRunner e DockerRunner, mas permanece deliberadamente não integrada ao
+orquestrador até a conclusão dos contratos de workspace e aprovação.

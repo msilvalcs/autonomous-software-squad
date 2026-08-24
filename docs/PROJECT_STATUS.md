@@ -252,3 +252,9 @@ Atualize este arquivo ao concluir um marco, alterar um risco relevante ou obter
 uma nova run representativa. Separe sempre o estado publicado no GitHub das
 mudanças locais ainda não versionadas e use os arquivos de auditoria como fonte
 de verdade para resultados de execução.
+### Runner estruturado
+
+O pacote `runner` oferece `runProjectCommand` para executar comandos
+agnósticos de linguagem a partir de um plano aprovado, com validação Zod,
+isolamento de workspace, timeout, abort, rede limitada e ambiente sem
+credenciais. A API ainda não está integrada ao orquestrador principal.

@@ -21,6 +21,7 @@ import {
   WorkspaceManager,
   type AllowedCommand
 } from "./index.js";
+import type { ProjectCommand } from "@squad/schemas";
 
 const temporaryDirectories: string[] = [];
 
@@ -63,6 +64,111 @@ afterEach(async () => {
 });
 
 describe("LocalRunner", () => {
+  const nodeCommand = (
+    args: string[],
+    workingDirectory = ".",
+    timeoutMs = 10_000
+  ): ProjectCommand => ({
+      executable: process.execPath,
+      args,
+      purpose: "test",
+      workingDirectory,
+      networkAccess: "none",
+      timeoutMs
+    });
+
+  it("executa comando estruturado aprovado em subdiretório", async () => {
+    const { baseDirectory, workspace } = await createWorkspace();
+    await mkdir(path.join(workspace, "subdir"));
+    const command = nodeCommand(
+      ["-e", "process.stdout.write(process.cwd())"],
+      "subdir"
+    );
+    const result = await new LocalRunner(baseDirectory).runProjectCommand({
+      workspace,
+      command,
+      approvedCommands: [command]
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain(path.join(workspace, "subdir"));
+  });
+
+  it("rejeita plano vazio e args divergentes", async () => {
+    const { baseDirectory, workspace } = await createWorkspace();
+    const command = nodeCommand(["-e", "process.exit(0)"]);
+    const runner = new LocalRunner(baseDirectory);
+    await expect(runner.runProjectCommand({
+      workspace,
+      command,
+      approvedCommands: []
+    })).rejects.toThrow("approved command plan");
+    await expect(runner.runProjectCommand({
+      workspace,
+      command,
+      approvedCommands: [nodeCommand(["-e", "process.exit(1)"])]
+    })).rejects.toThrow("approved command plan");
+  });
+
+  it("rejeita escape e symlink no working directory", async () => {
+    const { baseDirectory, workspace } = await createWorkspace();
+    const outside = await mkdtemp(path.join(tmpdir(), "squad-outside-"));
+    temporaryDirectories.push(outside);
+    const runner = new LocalRunner(baseDirectory);
+    const escape = nodeCommand([], "../outside");
+    await expect(runner.runProjectCommand({
+      workspace,
+      command: escape,
+      approvedCommands: [escape]
+    })).rejects.toThrow();
+    await symlink(outside, path.join(workspace, "link"));
+    const linked = nodeCommand([], "link");
+    await expect(runner.runProjectCommand({
+      workspace,
+      command: linked,
+      approvedCommands: [linked]
+    })).rejects.toThrow("symbolic link");
+  });
+
+  it("aplica timeout, abort e remove credenciais", async () => {
+    const { baseDirectory, workspace } = await createWorkspace();
+    const runner = new LocalRunner(baseDirectory);
+    const slow = nodeCommand(["-e", "setTimeout(() => {}, 5000)"], ".", 50);
+    const timed = await runner.runProjectCommand({
+      workspace,
+      command: slow,
+      approvedCommands: [slow]
+    });
+    expect(timed.timedOut).toBe(true);
+    const controller = new AbortController();
+    const abortCommand = nodeCommand(["-e", "setTimeout(() => {}, 5000)"]);
+    const pending = runner.runProjectCommand({
+      workspace,
+      command: abortCommand,
+      approvedCommands: [abortCommand],
+      signal: controller.signal
+    });
+    controller.abort();
+    const aborted = await pending;
+    expect(aborted.durationMs).toBeLessThan(2_000);
+    const envCommand = nodeCommand([
+      "-e",
+      "process.stdout.write(process.env.OPENAI_API_KEY ?? 'absent')"
+    ]);
+    const original = process.env.OPENAI_API_KEY;
+    process.env.OPENAI_API_KEY = "secret";
+    try {
+      const envResult = await runner.runProjectCommand({
+        workspace,
+        command: envCommand,
+        approvedCommands: [envCommand]
+      });
+      expect(envResult.stdout).toContain("absent");
+    } finally {
+      if (original === undefined) delete process.env.OPENAI_API_KEY;
+      else process.env.OPENAI_API_KEY = original;
+    }
+  }, 15_000);
+
   it("executa um comando permitido", async () => {
     const { baseDirectory, workspace } =
       await createWorkspace();
@@ -335,6 +441,51 @@ describe("DockerRunner", () => {
     const networkIndex = args.indexOf("--network");
 
     expect(args[networkIndex + 1]).toBe("registry-egress");
+  });
+
+  it("traduz comando estruturado para argumentos Docker sem shell", async () => {
+    const { baseDirectory, workspace } = await createWorkspace();
+    const fakeDocker = path.join(baseDirectory, "structured-docker.mjs");
+    await mkdir(path.join(workspace, "service"));
+    await writeFile(
+      fakeDocker,
+      [
+        "#!/usr/bin/env node",
+        "console.log(JSON.stringify(process.argv.slice(2)));"
+      ].join("\n"),
+      "utf8"
+    );
+    await chmod(fakeDocker, 0o755);
+    const command: ProjectCommand = {
+      executable: "python",
+      args: ["-m", "pytest"],
+      purpose: "test",
+      workingDirectory: "service",
+      networkAccess: "none",
+      timeoutMs: 10_000
+    };
+    const result = await new DockerRunner({
+      baseDirectory,
+      dockerBinary: fakeDocker,
+      image: "multi-stack:test"
+    }).runProjectCommand({
+      workspace,
+      command,
+      approvedCommands: [command]
+    });
+    const args = JSON.parse(result.stdout) as string[];
+    const imageIndex = args.indexOf("multi-stack:test");
+    const workdirIndex = args.lastIndexOf("--workdir");
+    const networkIndex = args.indexOf("--network");
+
+    expect(args[workdirIndex + 1]).toBe("/workspace/service");
+    expect(workdirIndex).toBeLessThan(imageIndex);
+    expect(args.slice(imageIndex + 1)).toEqual([
+      "python",
+      "-m",
+      "pytest"
+    ]);
+    expect(args[networkIndex + 1]).toBe("none");
   });
 
   it("rejeita workspace fora da pasta permitida", async () => {

@@ -7,11 +7,17 @@ import {
   lstat,
   mkdir,
   readdir,
+  realpath,
   rm
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { RepositorySourceSchema, type RepositorySource } from "@squad/schemas";
+import {
+  ProjectCommandSchema,
+  RepositorySourceSchema,
+  type ProjectCommand,
+  type RepositorySource
+} from "@squad/schemas";
 
 export type AllowedCommand =
   | "npm install"
@@ -27,8 +33,20 @@ export interface ExecutionRequest {
   signal?: AbortSignal;
 }
 
+export interface ProjectExecutionRequest {
+  workspace: string;
+  command: ProjectCommand;
+  approvedCommands: ProjectCommand[];
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
+export interface StructuredExecutionRunner {
+  runProjectCommand(request: ProjectExecutionRequest): Promise<ExecutionResult>;
+}
+
 export interface ExecutionResult {
-  command: AllowedCommand;
+  command: string;
   exitCode: number | null;
   stdout: string;
   stderr: string;
@@ -121,7 +139,7 @@ export function createRunnerEnvironment(
   return environment;
 }
 
-export class LocalRunner implements ExecutionRunner {
+export class LocalRunner implements ExecutionRunner, StructuredExecutionRunner {
   readonly backend = "local" as const;
   readonly policy: RunnerExecutionPolicy = {
     runtime: "local-process",
@@ -243,6 +261,30 @@ export class LocalRunner implements ExecutionRunner {
     });
   }
 
+  async runProjectCommand(
+    request: ProjectExecutionRequest
+  ): Promise<ExecutionResult> {
+    const workspace = await this.resolveStructuredWorkspace(request.workspace);
+    const command = validateApprovedProjectCommand(request, this.policy);
+    const workingDirectory = await resolveSafeWorkingDirectory(workspace, command.workingDirectory);
+    const timeoutMs = Math.min(request.timeoutMs ?? command.timeoutMs, this.policy.limits.timeoutMs, command.timeoutMs);
+    validateTimeout(timeoutMs, this.policy.limits.timeoutMs);
+    return runProcess({
+      executable: command.executable,
+      args: command.args,
+      cwd: workingDirectory,
+      env: createRunnerEnvironment(process.env, path.join(tmpdir(), "autonomous-squad-runner"), this.playwrightBrowsersPath),
+      timeoutMs,
+      command: command.executable + (command.args.length ? ` ${command.args.join(" ")}` : ""),
+      signal: request.signal
+    });
+  }
+
+  private async resolveStructuredWorkspace(workspace: string): Promise<string> {
+    const resolved = this.resolveWorkspace(workspace);
+    return ensureRealWorkspace(this.baseDirectory, resolved);
+  }
+
   private resolveWorkspace(workspace: string): string {
     const resolvedWorkspace = path.resolve(workspace);
     const relativePath = path.relative(
@@ -274,7 +316,7 @@ export interface DockerRunnerOptions {
   installNetwork?: string;
 }
 
-export class DockerRunner implements ExecutionRunner {
+export class DockerRunner implements ExecutionRunner, StructuredExecutionRunner {
   readonly backend = "docker" as const;
   private readonly baseDirectory: string;
   private readonly image: string;
@@ -468,6 +510,46 @@ export class DockerRunner implements ExecutionRunner {
       request,
       onTimeout: () =>
         removeContainer(this.dockerBinary, containerName)
+    });
+  }
+
+  async runProjectCommand(
+    request: ProjectExecutionRequest
+  ): Promise<ExecutionResult> {
+    const workspace = await ensureRealWorkspace(
+      this.baseDirectory,
+      resolveAllowedWorkspace(this.baseDirectory, request.workspace)
+    );
+    const command = validateApprovedProjectCommand(request, this.policy);
+    const workingDirectory = await resolveSafeWorkingDirectory(
+      workspace,
+      command.workingDirectory
+    );
+    const timeoutMs = Math.min(
+      request.timeoutMs ?? command.timeoutMs,
+      this.policy.limits.timeoutMs,
+      command.timeoutMs
+    );
+    validateTimeout(timeoutMs, this.policy.limits.timeoutMs);
+    const containerName = createContainerName(workspace);
+    const relativeCwd = path.relative(workspace, workingDirectory) || ".";
+    const network = command.networkAccess === "install-only" ? this.installNetwork : "none";
+    const args = [
+      "run",
+      "--rm",
+      ...this.containerSecurityArguments(workspace, containerName, network),
+      "--workdir",
+      "/workspace/" + relativeCwd,
+      this.image,
+      command.executable,
+      ...command.args
+    ];
+    return runDockerProcess({
+      dockerBinary: this.dockerBinary,
+      args,
+      workspace,
+      request: { workspace, command: "npm test", timeoutMs },
+      onTimeout: () => removeContainer(this.dockerBinary, containerName)
     });
   }
 
@@ -860,6 +942,129 @@ function validateTimeout(
   }
 }
 
+function validateApprovedProjectCommand(
+  request: ProjectExecutionRequest,
+  policy: RunnerExecutionPolicy
+): ProjectCommand {
+  const command = ProjectCommandSchema.parse(request.command);
+  const approved = request.approvedCommands.map((value) =>
+    ProjectCommandSchema.parse(value)
+  );
+  if (!approved.some((candidate) =>
+    JSON.stringify(command) === JSON.stringify(candidate)
+  )) {
+    throw new Error("Project command does not match the approved command plan");
+  }
+  if (
+    command.networkAccess === "install-only" &&
+    policy.networkAccess === "none"
+  ) {
+    throw new Error("Project command network access exceeds runner policy");
+  }
+  return command;
+}
+
+async function ensureRealWorkspace(
+  baseDirectory: string,
+  workspace: string
+): Promise<string> {
+  const [baseReal, workspaceReal] = await Promise.all([
+    realpath(baseDirectory),
+    realpath(workspace)
+  ]);
+  const relative = path.relative(baseReal, workspaceReal);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error("Workspace resolves outside the allowed directory");
+  }
+  return workspaceReal;
+}
+
+async function resolveSafeWorkingDirectory(
+  workspace: string,
+  workingDirectory: string
+): Promise<string> {
+  if (workingDirectory !== "." && workingDirectory.includes("\\")) {
+    throw new Error("Command working directory must use a POSIX relative path");
+  }
+  const candidate = path.resolve(workspace, workingDirectory);
+  const relative = path.relative(workspace, candidate);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error("Command working directory is outside the workspace");
+  }
+  const entries = [workspace, ...relative.split(path.sep).filter(Boolean)];
+  let current = entries[0] as string;
+  for (const entry of entries.slice(1)) {
+    current = path.join(current, entry);
+    if ((await lstat(current)).isSymbolicLink()) {
+      throw new Error("Command working directory cannot traverse a symbolic link");
+    }
+  }
+  const real = await realpath(candidate);
+  const realRelative = path.relative(workspace, real);
+  if (realRelative.startsWith("..") || path.isAbsolute(realRelative)) {
+    throw new Error("Command working directory resolves outside the workspace");
+  }
+  return real;
+}
+
+async function runProcess(input: {
+  executable: string;
+  args: string[];
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  timeoutMs: number;
+  command: string;
+  signal?: AbortSignal;
+}): Promise<ExecutionResult> {
+  const startedAt = Date.now();
+  return new Promise((resolve, reject) => {
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    let settled = false;
+    const child = spawn(input.executable, input.args, {
+      cwd: input.cwd,
+      shell: false,
+      env: input.env,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    const abort = () => child.kill("SIGKILL");
+    input.signal?.addEventListener("abort", abort, { once: true });
+    if (input.signal?.aborted) {
+      abort();
+    }
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGTERM");
+    }, input.timeoutMs);
+    child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+    child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+    child.on("error", (error) => {
+      clearTimeout(timeout);
+      input.signal?.removeEventListener("abort", abort);
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
+    });
+    child.on("close", (exitCode) => {
+      clearTimeout(timeout);
+      input.signal?.removeEventListener("abort", abort);
+      if (!settled) {
+        settled = true;
+        resolve({
+          command: input.command,
+          exitCode,
+          stdout,
+          stderr,
+          durationMs: Date.now() - startedAt,
+          timedOut
+        });
+      }
+    });
+  });
+}
+
 function createContainerName(workspace: string): string {
   const workspaceName = path.basename(workspace)
     .toLowerCase()
@@ -901,7 +1106,7 @@ async function runDockerProcess(
     const timeout = setTimeout(() => {
       timedOut = true;
       timeoutCleanup = input.onTimeout();
-      child.kill("SIGTERM");
+      child.kill("SIGKILL");
     }, input.request.timeoutMs);
 
     child.stdout.on("data", (chunk: Buffer) => {
