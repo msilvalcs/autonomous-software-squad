@@ -1,3 +1,4 @@
+import { buildCreateRunRequest, type CreateRunRequest } from "./repository-source";
 import type {
   ArtifactManifest,
   AuditEvent,
@@ -32,16 +33,19 @@ export async function getDocumentation(): Promise<ProjectDocument[]> {
 }
 
 export async function createRun(
-  briefing: string
+  briefingOrParams: string | CreateRunRequest
 ): Promise<CreateRunResponse> {
+  const params = typeof briefingOrParams === "string"
+    ? buildCreateRunRequest(briefingOrParams, "template", "", "", "")
+    : briefingOrParams;
   const response = await fetch(`${API_BASE_URL}/runs`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
     body: JSON.stringify({
-      briefing,
-      maxAttempts: 3
+      ...params,
+      maxAttempts: params.maxAttempts
     })
   });
 

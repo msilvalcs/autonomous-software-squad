@@ -161,7 +161,7 @@ também os testes Playwright dentro da imagem provisionada.
   caminhos locais e referências Git.
 - [x] Implementar análise somente leitura de linguagem, framework e comandos.
 - [x] Adaptar Runner, Orquestrador e agentes para consumir comandos estruturados.
-- [ ] Integrar origem de repositório ao fluxo da API e do dashboard.
+- [x] Integrar origem de repositório ao fluxo da API e do dashboard.
 
 ### P0 - Fechar a entrega atual
 
@@ -259,3 +259,7 @@ O pacote `runner` oferece `runProjectCommand` para executar comandos
 agnósticos de linguagem a partir de um plano aprovado, com validação Zod,
 isolamento de workspace, timeout, abort, rede limitada e ambiente sem
 credenciais. A API ainda não está integrada ao orquestrador principal.
+
+## Orquestração agnóstica - integração API/dashboard
+
+A API valida origens local/Git e o dashboard exibe a origem e o perfil detectado. O fluxo de template permanece retrocompatível.

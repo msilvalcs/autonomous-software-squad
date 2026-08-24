@@ -46,6 +46,30 @@ export interface RunState {
   updatedAt: string;
   active: boolean;
   canResume: boolean;
+  repositorySource?: RepositorySource;
+  profile?: ProjectProfile;
+}
+
+export type RepositorySource =
+  | { type: "local"; path: string }
+  | { type: "git"; url: string; ref?: string };
+
+export interface ProjectCommand {
+  executable: string;
+  args: string[];
+  purpose: string;
+  workingDirectory: string;
+  networkAccess: string;
+  timeoutMs: number;
+}
+
+export interface ProjectProfile {
+  languages: string[];
+  frameworks: string[];
+  packageManagers: string[];
+  isMonorepo: boolean;
+  commands: Record<string, ProjectCommand | undefined>;
+  detectedFiles?: string[];
 }
 
 export interface ExecutionPolicy {
@@ -164,4 +188,6 @@ export interface RunSummary {
   updatedAt: string;
   active: boolean;
   canResume: boolean;
+  repositorySource?: RepositorySource;
+  profile?: ProjectProfile;
 }

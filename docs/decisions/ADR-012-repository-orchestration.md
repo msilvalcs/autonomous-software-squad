@@ -33,10 +33,16 @@ com a allowlist existente e evita tratar texto livre como shell.
 
 O primeiro incremento implementa os contratos, a materialização isolada de
 fontes locais e Git e o Project Analyzer somente leitura. A integração dessas
-capacidades à API e ao dashboard permanece pendente.
+capacidades está integrada à API e ao dashboard. A criação da run executa o
+diagnóstico uma única vez e mantém a origem e o perfil na auditoria.
 ## Estado da API estruturada do Runner
 
 O Runner possui a API `runProjectCommand`, que valida comandos contra uma
 lista de planos aprovados e executa `executable` e `args` sem shell. Ela cobre
 LocalRunner e DockerRunner. O Orquestrador a utiliza apenas no modo repositório
 e registra comandos ausentes como `VALIDATION_COMMAND_SKIPPED`.
+
+### Integração de fronteira
+
+A API usa um helper validado para normalizar
+epositorySource; o dashboard usa contratos e helpers puros para manter o formulário testável sem acoplamento ao React.

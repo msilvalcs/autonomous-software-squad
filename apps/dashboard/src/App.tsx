@@ -16,6 +16,7 @@ import {
   resumeRun,
   subscribeToEvents
 } from "./api/squad-api";
+import { buildCreateRunRequest, validateRepositoryFields } from "./api/repository-source";
 import type {
   ArtifactManifest,
   AuditEvent,
@@ -38,6 +39,10 @@ const terminalStatuses: RunStatus[] = [
 const selectedRunStorageKey = "squad.selectedRunId";
 
 function App() {
+  const [sourceMode, setSourceMode] = useState<"template" | "local" | "git">("template");
+  const [localPath, setLocalPath] = useState("");
+  const [gitUrl, setGitUrl] = useState("");
+  const [gitRef, setGitRef] = useState("");
   const [briefing, setBriefing] = useState(
     "Crie uma aplicação web para controle de tarefas."
   );
@@ -231,6 +236,16 @@ function App() {
       return;
     }
 
+    const sourceError = validateRepositoryFields(
+      sourceMode,
+      localPath,
+      gitUrl
+    );
+    if (sourceError) {
+      setError(sourceError);
+      return;
+    }
+
     try {
       setStarting(true);
       setError("");
@@ -238,7 +253,13 @@ function App() {
       setRun(null);
       setArtifact(null);
 
-      const result = await createRun(briefing);
+      const result = await createRun(buildCreateRunRequest(
+        briefing,
+        sourceMode,
+        localPath,
+        gitUrl,
+        gitRef
+      ));
       setRunId(result.runId);
       void refreshHistory();
     } catch (caughtError) {
@@ -373,6 +394,52 @@ function App() {
           <label htmlFor="briefing">
             Briefing do cliente
           </label>
+
+          <fieldset className="repository-source">
+            <legend>Origem do projeto</legend>
+            <select
+              aria-label="Tipo de origem"
+              value={sourceMode}
+              onChange={(event) =>
+                setSourceMode(event.target.value as typeof sourceMode)
+              }
+              disabled={starting || hasActiveRun}
+            >
+              <option value="template">Template React</option>
+              <option value="local">Repositório local</option>
+              <option value="git">Repositório Git</option>
+            </select>
+            {sourceMode === "local" && (
+              <input
+                aria-label="Caminho local"
+                value={localPath}
+                onChange={(event) => setLocalPath(event.target.value)}
+                placeholder="/home/usuario/projetos/aplicacao"
+                disabled={starting || hasActiveRun}
+              />
+            )}
+            {sourceMode === "git" && (
+              <>
+                <input
+                  aria-label="URL Git"
+                  value={gitUrl}
+                  onChange={(event) => setGitUrl(event.target.value)}
+                  placeholder="https://github.com/organizacao/projeto.git"
+                  disabled={starting || hasActiveRun}
+                />
+                <input
+                  aria-label="Branch ou referência"
+                  value={gitRef}
+                  onChange={(event) => setGitRef(event.target.value)}
+                  placeholder="Branch ou referência (opcional)"
+                  disabled={starting || hasActiveRun}
+                />
+              </>
+            )}
+            <small>
+              Caminhos locais são resolvidos pela máquina onde a API está em execução.
+            </small>
+          </fieldset>
 
           <textarea
             id="briefing"
@@ -725,6 +792,73 @@ function App() {
             </div>
             <StatusBadge status={run.status} />
           </div>
+
+          {run.repositorySource && (
+            <section className="repository-details">
+              <h3>Repositório analisado</h3>
+              <p>
+                <strong>Origem:</strong>{" "}
+                {run.repositorySource.type === "local"
+                  ? run.repositorySource.path
+                  : run.repositorySource.url}
+              </p>
+              {run.repositorySource.type === "git" &&
+                run.repositorySource.ref && (
+                  <p>
+                    <strong>Referência:</strong>{" "}
+                    {run.repositorySource.ref}
+                  </p>
+                )}
+              {run.profile && (
+                <details open>
+                  <summary>Perfil detectado</summary>
+                  <p>
+                    <strong>Linguagens:</strong>{" "}
+                    {run.profile.languages.join(", ") || "não detectadas"}
+                  </p>
+                  <p>
+                    <strong>Frameworks:</strong>{" "}
+                    {run.profile.frameworks.join(", ") || "não detectados"}
+                  </p>
+                  <p>
+                    <strong>Gerenciadores:</strong>{" "}
+                    {run.profile.packageManagers.join(", ") || "não detectados"}
+                  </p>
+                  <p>
+                    <strong>Monorepo:</strong>{" "}
+                    {run.profile.isMonorepo ? "sim" : "não"}
+                  </p>
+                  <ul>
+                    {Object.entries(run.profile.commands)
+                      .filter((entry): entry is [
+                        string,
+                        NonNullable<typeof entry[1]>
+                      ] => Boolean(entry[1]))
+                      .map(([purpose, command]) => (
+                        <li key={purpose}>
+                          <code>
+                            {command.executable} {command.args.join(" ")}
+                          </code>{" "}
+                          - {command.purpose}
+                        </li>
+                      ))}
+                  </ul>
+                  {run.profile.detectedFiles && (
+                    <details>
+                      <summary>
+                        Arquivos detectados ({run.profile.detectedFiles.length})
+                      </summary>
+                      <ul>
+                        {run.profile.detectedFiles.map((file) => (
+                          <li key={file}><code>{file}</code></li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                </details>
+              )}
+            </section>
+          )}
 
           {visibleArtifact ? (
             <>

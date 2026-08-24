@@ -32,8 +32,13 @@ import {
 } from "@squad/runner";
 
 import { CodexClient } from "@squad/codex-client";
-import type { AuditEvent, RunState } from "@squad/schemas";
-
+import type {
+  AuditEvent,
+  RepositorySource,
+  RunState
+} from "@squad/schemas";
+import { ProjectAnalyzer } from "@squad/project-analyzer";
+import { parseRepositorySource } from "./repository-source.js";
 import {
   createArtifactArchive,
   openArtifactFile,
@@ -78,6 +83,7 @@ const workspaceManager = new WorkspaceManager({
     "skills"
   )
 });
+const projectAnalyzer = new ProjectAnalyzer();
 
 const runner = createExecutionRunner({
   mode: process.env.EXECUTION_MODE,
@@ -160,6 +166,7 @@ const orchestrator = new Orchestrator({
   eventStore,
   runner,
   workspaceManager,
+  projectAnalyzer,
   routingPolicy,
   isolationPolicy,
   storyPublisher: githubIssuesPublisher
@@ -385,6 +392,7 @@ app.post<{
   Body: {
     briefing?: string;
     maxAttempts?: number;
+    repositorySource?: RepositorySource;
   };
 }>("/runs", async (request, reply) => {
   const activeRunId = activeExecutions.keys().next().value;
@@ -404,16 +412,28 @@ app.post<{
     });
   }
 
+  const sourceResult = parseRepositorySource(
+    request.body?.repositorySource
+  );
+  if (!sourceResult.success) {
+    return reply.status(400).send({
+      error: sourceResult.error,
+      details: sourceResult.details
+    });
+  }
   const state = await orchestrator.createRun({
     briefing,
-    maxAttempts: request.body.maxAttempts
+    maxAttempts: request.body.maxAttempts,
+    repositorySource: sourceResult.data
   });
 
   startExecution(state, false);
 
   return reply.status(202).send({
     runId: state.runId,
-    status: state.status
+    status: state.status,
+    repositorySource: state.repositorySource ?? null,
+    profile: state.profile ?? null
   });
 });
 
@@ -538,7 +558,9 @@ app.post<{
 
   return reply.status(202).send({
     runId: state.runId,
-    status: state.status
+    status: state.status,
+    repositorySource: state.repositorySource ?? null,
+    profile: state.profile ?? null
   });
 });
 

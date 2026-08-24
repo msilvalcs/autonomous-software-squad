@@ -778,3 +778,46 @@ button:disabled {
     justify-content: center;
   }
 }
+
+.repository-source {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0;
+  padding: 14px;
+  border: 1px solid #263449;
+  border-radius: 10px;
+}
+
+.repository-source select,
+.repository-source input {
+  min-width: 0;
+  width: 100%;
+}
+
+.repository-source small {
+  color: #94a3b8;
+}
+
+.repository-details {
+  margin: 18px 0;
+  padding: 16px;
+  border: 1px solid #263449;
+  border-radius: 12px;
+  background: #0b101a;
+}
+
+.repository-details p,
+.repository-details code {
+  overflow-wrap: anywhere;
+}
+
+.repository-details ul {
+  padding-left: 20px;
+}
+
+@media (max-width: 520px) {
+  .repository-source,
+  .repository-details {
+    padding: 12px;
+  }
+}

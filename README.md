@@ -565,3 +565,7 @@ Os testes cobrem atualmente:
 ## Licença
 
 Defina a licença antes da publicação pública do repositório. Para um projeto aberto, MIT é uma opção simples; valide essa decisão com todos os integrantes da equipe.
+
+### Origens de repositório
+
+O dashboard e a API aceitam o template legado, caminhos locais copiados para workspace isolado e URLs Git com branch/ref opcional. A análise detecta linguagens, frameworks, gerenciadores, comandos permitidos e arquivos relevantes antes da execução.
